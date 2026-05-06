@@ -1,10 +1,20 @@
-import type { Agent, Agency, Property } from "@/lib/api";
+"use client";
+
+import { FormEvent, useMemo, useState } from "react";
+import Link from "next/link";
+import { useRouter } from "next/navigation";
+import { createVisitRequest, type Agent, type Agency, type Property } from "@/lib/api";
+import { useAuth } from "@/components/AuthProvider";
+const API_BASE_URL = "http://127.0.0.1:8000"; // Or whatever port Python is running on
 
 interface PropertyCardProps {
     property: Property;
     agent?: Agent;
     agency?: Agency;
     showAgentTools?: boolean;
+    leadCount?: number;
+    onReviewLeads?: (property: Property) => void;
+    onStatusChange?: (propertyId: number, status: string) => void;
 }
 
 const statusStyles: Record<string, string> = {
@@ -12,6 +22,14 @@ const statusStyles: Record<string, string> = {
     sold: "bg-stone-200 text-stone-700",
     reserved: "bg-amber-100 text-amber-800",
     pending: "bg-sky-100 text-sky-800",
+    archived: "bg-red-100 text-red-800",
+};
+
+const propertyTypeLabels: Record<string, string> = {
+    apartment: "Apartment",
+    house: "House",
+    studio: "Studio",
+    loft: "Loft",
 };
 
 export function formatPrice(price: number | string) {
@@ -29,7 +47,18 @@ export default function PropertyCard({
     agent,
     agency,
     showAgentTools = false,
+    leadCount = 0,
+    onReviewLeads,
+    onStatusChange,
 }: PropertyCardProps) {
+    const router = useRouter();
+    const { user } = useAuth();
+    const [visitOpen, setVisitOpen] = useState(false);
+    const [visitMessage, setVisitMessage] = useState("");
+    const [visitError, setVisitError] = useState("");
+    const [visitSuccess, setVisitSuccess] = useState("");
+    const [submittingVisit, setSubmittingVisit] = useState(false);
+
     const normalizedStatus = property.status?.toLowerCase() || "available";
     const statusClass = statusStyles[normalizedStatus] || "bg-stone-100 text-stone-700";
     const imageSeed = property.property_id % 4;
@@ -39,10 +68,55 @@ export default function PropertyCard({
         "from-stone-900 via-rose-700 to-amber-400",
         "from-teal-900 via-slate-700 to-lime-400",
     ][imageSeed];
+    const details = useMemo(
+        () => [
+            propertyTypeLabels[property.property_type || ""] || property.property_type || "Property",
+            `${property.bedrooms || 1} room${(property.bedrooms || 1) > 1 ? "s" : ""}`,
+            `${property.surface || 45} m2`,
+        ],
+        [property.bedrooms, property.property_type, property.surface],
+    );
+
+    const fullImageUrl = `${API_BASE_URL}${property.photo_url}`;
+
+    async function handleVisitSubmit(event: FormEvent<HTMLFormElement>) {
+        event.preventDefault();
+        setVisitError("");
+        setVisitSuccess("");
+
+        if (!user) {
+            router.push("/login");
+            return;
+        }
+
+        setSubmittingVisit(true);
+        try {
+            await createVisitRequest(property.property_id, {
+                user_id: user.id,
+                name: `${user.first_name} ${user.last_name}`,
+                email: user.email,
+                message: visitMessage,
+            });
+            setVisitMessage("");
+            setVisitSuccess("Visit request sent. The agent can now review it from the office.");
+        } catch (error) {
+            setVisitError(error instanceof Error ? error.message : "Could not request this visit.");
+        } finally {
+            setSubmittingVisit(false);
+        }
+    }
 
     return (
         <article className="overflow-hidden rounded-lg border border-stone-200 bg-white shadow-sm transition hover:-translate-y-1 hover:shadow-lg">
-            <div className={`relative h-48 bg-gradient-to-br ${imageClass}`}>
+            <div className={`relative h-48 bg-linear-to-br ${imageClass}`}>
+                {property.photo_url ? (
+                    // eslint-disable-next-line @next/next/no-img-element
+                    <img
+                        src={fullImageUrl}
+                        alt={property.title}
+                        className="h-full w-full object-cover"
+                    />
+                ) : null}
                 <div className="absolute inset-x-5 bottom-5 rounded-md bg-white/90 p-4 shadow-sm backdrop-blur">
                     <p className="text-2xl font-bold text-stone-950">{formatPrice(property.price)}</p>
                     <p className="mt-1 text-sm font-medium text-stone-600">{property.location}</p>
@@ -55,6 +129,14 @@ export default function PropertyCard({
                     <span className={`rounded-full px-3 py-1 text-xs font-bold capitalize ${statusClass}`}>
                         {property.status}
                     </span>
+                </div>
+
+                <div className="grid grid-cols-3 gap-2 text-center text-xs font-bold text-stone-700">
+                    {details.map((detail) => (
+                        <span key={detail} className="rounded-md bg-stone-100 px-2 py-2">
+                            {detail}
+                        </span>
+                    ))}
                 </div>
 
                 <p className="line-clamp-3 text-sm leading-6 text-stone-600">{property.description}</p>
@@ -81,19 +163,67 @@ export default function PropertyCard({
                 </div>
 
                 {showAgentTools ? (
-                    <div className="grid grid-cols-2 gap-2 pt-1">
-                        <button className="rounded-md bg-stone-950 px-3 py-2 text-sm font-semibold text-white">
-                            Review lead
+                    <div className="grid gap-2 pt-1">
+                        <button
+                            type="button"
+                            onClick={() => onReviewLeads?.(property)}
+                            className="rounded-md bg-stone-950 px-3 py-2 text-sm font-semibold text-white"
+                        >
+                            Review lead{leadCount === 1 ? "" : "s"} ({leadCount})
                         </button>
-                        <button className="rounded-md border border-stone-300 px-3 py-2 text-sm font-semibold text-stone-800">
-                            Update status
-                        </button>
+                        <select
+                            value={property.status}
+                            onChange={(event) => onStatusChange?.(property.property_id, event.target.value)}
+                            className="min-h-10 rounded-md border border-stone-300 px-3 text-sm font-semibold text-stone-800"
+                        >
+                            <option value="available">Available</option>
+                            <option value="pending">Pending</option>
+                            <option value="reserved">Reserved</option>
+                            <option value="sold">Sold</option>
+                            <option value="archived">Archived</option>
+                        </select>
                     </div>
                 ) : (
-                    <button className="w-full rounded-md bg-emerald-700 px-3 py-3 text-sm font-bold text-white transition hover:bg-emerald-800">
-                        Request a visit
-                    </button>
+                    <div className="grid gap-2 pt-1 sm:grid-cols-2">
+                        <Link
+                            href={`/properties/${property.property_id}`}
+                            className="rounded-md border border-stone-300 px-3 py-3 text-center text-sm font-bold text-stone-900 transition hover:bg-stone-100"
+                        >
+                            View details
+                        </Link>
+                        <button
+                            type="button"
+                            onClick={() => (user ? setVisitOpen((current) => !current) : router.push("/login"))}
+                            className="rounded-md bg-emerald-700 px-3 py-3 text-sm font-bold text-white transition hover:bg-emerald-800"
+                        >
+                            Request a visit
+                        </button>
+                    </div>
                 )}
+
+                {visitOpen ? (
+                    <form onSubmit={handleVisitSubmit} className="space-y-3 rounded-md bg-stone-50 p-3">
+                        <textarea
+                            value={visitMessage}
+                            onChange={(event) => setVisitMessage(event.target.value)}
+                            placeholder="Preferred date, questions, or contact details"
+                            className="min-h-24 w-full rounded-md border border-stone-300 px-3 py-2 text-sm text-stone-950 outline-none focus:border-emerald-700"
+                        />
+                        {visitError ? (
+                            <p className="text-sm font-semibold text-red-700">{visitError}</p>
+                        ) : null}
+                        {visitSuccess ? (
+                            <p className="text-sm font-semibold text-emerald-700">{visitSuccess}</p>
+                        ) : null}
+                        <button
+                            type="submit"
+                            disabled={submittingVisit}
+                            className="w-full rounded-md bg-stone-950 px-3 py-2 text-sm font-bold text-white disabled:bg-stone-400"
+                        >
+                            {submittingVisit ? "Sending..." : "Send request"}
+                        </button>
+                    </form>
+                ) : null}
             </div>
         </article>
     );

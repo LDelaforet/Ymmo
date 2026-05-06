@@ -4,25 +4,35 @@ import { FormEvent, useState } from "react";
 import { useRouter } from "next/navigation";
 import Navbar from "@/components/Navbar";
 import { useAuth } from "@/components/AuthProvider";
-import { createUser } from "@/lib/api";
+import { createUser, requestPasswordReset } from "@/lib/api";
 
 export default function LoginPage() {
     const router = useRouter();
     const { login } = useAuth();
     const [mode, setMode] = useState<"login" | "register">("login");
+    const [resetMode, setResetMode] = useState(false);
     const [firstName, setFirstName] = useState("");
     const [lastName, setLastName] = useState("");
     const [email, setEmail] = useState("");
     const [password, setPassword] = useState("");
     const [error, setError] = useState("");
+    const [notice, setNotice] = useState("");
     const [loading, setLoading] = useState(false);
 
     async function handleSubmit(event: FormEvent<HTMLFormElement>) {
         event.preventDefault();
         setError("");
+        setNotice("");
         setLoading(true);
 
         try {
+            if (resetMode) {
+                const response = await requestPasswordReset(email);
+                setNotice(response.message);
+                setLoading(false);
+                return;
+            }
+
             if (mode === "register") {
                 const createdUser = await createUser({
                     first_name: firstName,
@@ -38,7 +48,7 @@ export default function LoginPage() {
             }
 
             const loggedUser = await login(email, password);
-            router.push(loggedUser.role === "agent" || loggedUser.role === "admin" ? "/agent" : "/dashboard");
+            router.push(loggedUser.role === "admin" ? "/admin" : loggedUser.role === "agent" ? "/agent" : "/dashboard");
         } catch (submitError) {
             setError(submitError instanceof Error ? submitError.message : "Something went wrong.");
         } finally {
@@ -56,7 +66,11 @@ export default function LoginPage() {
                             Secure access
                         </p>
                         <h1 className="mt-2 text-3xl font-black text-stone-950">
-                            {mode === "login" ? "Log in to Ymmo" : "Create a client account"}
+                            {resetMode
+                                ? "Reset your password"
+                                : mode === "login"
+                                  ? "Log in to Ymmo"
+                                  : "Create a client account"}
                         </h1>
                         <p className="mt-3 text-sm leading-6 text-stone-600">
                             Clients get a search dashboard. Agents use the same login and unlock the agent office automatically from their role.
@@ -84,7 +98,7 @@ export default function LoginPage() {
                         </div>
 
                         <form onSubmit={handleSubmit} className="mt-6 space-y-4">
-                            {mode === "register" ? (
+                            {mode === "register" && !resetMode ? (
                                 <div className="grid gap-4 sm:grid-cols-2">
                                     <label className="block text-sm font-bold text-stone-700">
                                         First name
@@ -118,6 +132,7 @@ export default function LoginPage() {
                                 />
                             </label>
 
+                            {!resetMode ? (
                             <label className="block text-sm font-bold text-stone-700">
                                 Password
                                 <input
@@ -128,10 +143,16 @@ export default function LoginPage() {
                                     required
                                 />
                             </label>
+                            ) : null}
 
                             {error ? (
                                 <p className="rounded-md border border-red-200 bg-red-50 p-3 text-sm font-semibold text-red-700">
                                     {error}
+                                </p>
+                            ) : null}
+                            {notice ? (
+                                <p className="rounded-md border border-emerald-200 bg-emerald-50 p-3 text-sm font-semibold text-emerald-700">
+                                    {notice}
                                 </p>
                             ) : null}
 
@@ -140,8 +161,27 @@ export default function LoginPage() {
                                 disabled={loading}
                                 className="min-h-11 w-full rounded-md bg-emerald-700 px-4 py-3 text-sm font-bold text-white transition hover:bg-emerald-800 disabled:cursor-not-allowed disabled:bg-stone-400"
                             >
-                                {loading ? "Please wait..." : mode === "login" ? "Login" : "Create account"}
+                                {loading
+                                    ? "Please wait..."
+                                    : resetMode
+                                      ? "Send reset instructions"
+                                      : mode === "login"
+                                        ? "Login"
+                                        : "Create account"}
                             </button>
+                            {mode === "login" ? (
+                                <button
+                                    type="button"
+                                    onClick={() => {
+                                        setResetMode((current) => !current);
+                                        setError("");
+                                        setNotice("");
+                                    }}
+                                    className="w-full text-sm font-bold text-emerald-700 hover:text-emerald-900"
+                                >
+                                    {resetMode ? "Back to login" : "Forgot password?"}
+                                </button>
+                            ) : null}
                         </form>
                     </div>
 

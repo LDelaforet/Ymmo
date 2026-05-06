@@ -6,7 +6,17 @@ import { useRouter } from "next/navigation";
 import Navbar from "@/components/Navbar";
 import PropertyCard from "@/components/PropertyCard";
 import { useAuth } from "@/components/AuthProvider";
-import { fetchAgents, fetchAgencies, fetchProperties, type Agent, type Agency, type Property } from "@/lib/api";
+import {
+    fetchAgents,
+    fetchAgencies,
+    fetchProperties,
+    fetchSavedPropertyIds,
+    removeSavedPropertyForUser,
+    savePropertyForUser,
+    type Agent,
+    type Agency,
+    type Property,
+} from "@/lib/api";
 
 export default function ClientDashboardPage() {
     const router = useRouter();
@@ -15,6 +25,7 @@ export default function ClientDashboardPage() {
     const [agents, setAgents] = useState<Agent[]>([]);
     const [agencies, setAgencies] = useState<Agency[]>([]);
     const [savedIds, setSavedIds] = useState<number[]>([]);
+    const [error, setError] = useState("");
 
     useEffect(() => {
         if (ready && (!user || !isClient)) {
@@ -24,14 +35,19 @@ export default function ClientDashboardPage() {
 
     useEffect(() => {
         async function loadData() {
-            const [propertyData, agentData, agencyData] = await Promise.all([
-                fetchProperties(),
-                fetchAgents(),
-                fetchAgencies(),
-            ]);
-            setProperties(propertyData);
-            setAgents(agentData);
-            setAgencies(agencyData);
+            setError("");
+            try {
+                const [propertyData, agentData, agencyData] = await Promise.all([
+                    fetchProperties(),
+                    fetchAgents(),
+                    fetchAgencies(),
+                ]);
+                setProperties(propertyData);
+                setAgents(agentData);
+                setAgencies(agencyData);
+            } catch (loadError) {
+                setError(loadError instanceof Error ? loadError.message : "Could not load your dashboard.");
+            }
         }
 
         loadData();
@@ -39,19 +55,30 @@ export default function ClientDashboardPage() {
 
     useEffect(() => {
         if (!user) return;
-        queueMicrotask(() => {
-            const storedIds = window.localStorage.getItem(`ymmo.saved.${user.id}`);
-            setSavedIds(storedIds ? JSON.parse(storedIds) : []);
-        });
+        fetchSavedPropertyIds(user.id)
+            .then(setSavedIds)
+            .catch((loadError) => {
+                setError(loadError instanceof Error ? loadError.message : "Could not load saved properties.");
+            });
     }, [user]);
 
-    function toggleSaved(propertyId: number) {
+    async function toggleSaved(propertyId: number) {
         if (!user) return;
-        const nextIds = savedIds.includes(propertyId)
+        const isSaved = savedIds.includes(propertyId);
+        const nextIds = isSaved
             ? savedIds.filter((id) => id !== propertyId)
             : [...savedIds, propertyId];
         setSavedIds(nextIds);
-        window.localStorage.setItem(`ymmo.saved.${user.id}`, JSON.stringify(nextIds));
+        try {
+            if (isSaved) {
+                await removeSavedPropertyForUser(user.id, propertyId);
+            } else {
+                await savePropertyForUser(user.id, propertyId);
+            }
+        } catch (saveError) {
+            setSavedIds(savedIds);
+            setError(saveError instanceof Error ? saveError.message : "Could not update saved properties.");
+        }
     }
 
     const recommendedProperties = useMemo(
@@ -139,9 +166,14 @@ export default function ClientDashboardPage() {
                     </aside>
 
                     <div className="space-y-10">
+                        {error ? (
+                            <p className="rounded-lg border border-red-200 bg-red-50 p-4 text-sm font-semibold text-red-700">
+                                {error}
+                            </p>
+                        ) : null}
                         <section>
                             <div className="mb-4 flex items-center justify-between gap-4">
-                                <h2 className="text-2xl font-black text-stone-950">Recommended for you</h2>
+                                <h2 className="text-2xl font-black text-stone-950">Available now</h2>
                                 <Link href="/properties" className="text-sm font-bold text-emerald-700">
                                     Browse all
                                 </Link>

@@ -32,122 +32,110 @@ export interface Property {
     price: number | string;
     location: string;
     status: string;
+    bedrooms?: number;
+    surface?: number;
+    property_type?: string;
+    photo_url?: string;
+    created_at?: string;
     agency_id: number;
     agent_id: number;
 }
 
-export async function loginUser(credentials: { email: string; password: string }) {
-    const response = await fetch(`${API_URL}/auth/login`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(credentials),
+export interface VisitRequest {
+    visit_id: number;
+    property_id: number;
+    user_id?: number | null;
+    name: string;
+    email: string;
+    message: string;
+    status: string;
+    created_at?: string;
+}
+
+export type PropertyPayload = Omit<Property, "property_id" | "created_at">;
+
+async function apiRequest<T>(path: string, options: RequestInit = {}): Promise<T> {
+    const response = await fetch(`${API_URL}${path}`, {
+        ...options,
+        headers: {
+            "Content-Type": "application/json",
+            ...options.headers,
+        },
     });
 
     if (!response.ok) {
         const error = await response.json().catch(() => null);
-        throw new Error(error?.detail || "Invalid email or password");
+        throw new Error(error?.detail || `API request failed (${response.status})`);
     }
 
-    return (await response.json()) as User;
+    return (await response.json()) as T;
+}
+
+export async function loginUser(credentials: { email: string; password: string }) {
+    return apiRequest<User>("/auth/login", {
+        method: "POST",
+        body: JSON.stringify(credentials),
+    });
+}
+
+export async function requestPasswordReset(email: string) {
+    return apiRequest<{ message: string }>("/auth/forgot-password", {
+        method: "POST",
+        body: JSON.stringify({ email }),
+    });
 }
 
 export async function fetchUsers(): Promise<User[]> {
-    try {
-        const response = await fetch(`${API_URL}/users`);
-        if (!response.ok) throw new Error("Failed to fetch users");
-        return await response.json();
-    } catch (error) {
-        console.error("Error fetching users:", error);
-        return [];
-    }
+    return apiRequest<User[]>("/users");
 }
 
-export async function fetchUser(id: number): Promise<User | null> {
-    try {
-        const response = await fetch(`${API_URL}/users/${id}`);
-        if (!response.ok) throw new Error("Failed to fetch user");
-        return await response.json();
-    } catch (error) {
-        console.error("Error fetching user:", error);
-        return null;
-    }
+export async function fetchUser(id: number): Promise<User> {
+    return apiRequest<User>(`/users/${id}`);
 }
 
 export async function fetchAgents(): Promise<Agent[]> {
-    try {
-        const response = await fetch(`${API_URL}/agents`);
-        if (!response.ok) throw new Error("Failed to fetch agents");
-        return await response.json();
-    } catch (error) {
-        console.error("Error fetching agents:", error);
-        return [];
-    }
+    return apiRequest<Agent[]>("/agents");
 }
 
-export async function fetchAgent(id: number): Promise<Agent | null> {
-    try {
-        const response = await fetch(`${API_URL}/agents/${id}`);
-        if (!response.ok) throw new Error("Failed to fetch agent");
-        return await response.json();
-    } catch (error) {
-        console.error("Error fetching agent:", error);
-        return null;
-    }
+export async function fetchAgent(id: number): Promise<Agent> {
+    return apiRequest<Agent>(`/agents/${id}`);
 }
 
 export async function fetchProperties(): Promise<Property[]> {
-    try {
-        const response = await fetch(`${API_URL}/properties`);
-        if (!response.ok) throw new Error("Failed to fetch properties");
-        return await response.json();
-    } catch (error) {
-        console.error("Error fetching properties:", error);
-        return [];
-    }
+    return apiRequest<Property[]>("/properties");
 }
 
-export async function fetchProperty(id: number): Promise<Property | null> {
-    try {
-        const response = await fetch(`${API_URL}/properties/${id}`);
-        if (!response.ok) throw new Error("Failed to fetch property");
-        return await response.json();
-    } catch (error) {
-        console.error("Error fetching property:", error);
-        return null;
-    }
+export async function fetchProperty(id: number): Promise<Property> {
+    return apiRequest<Property>(`/properties/${id}`);
 }
 
 export async function fetchPropertiesByAgency(agencyId: number): Promise<Property[]> {
-    try {
-        const response = await fetch(`${API_URL}/properties/agency/${agencyId}`);
-        if (!response.ok) throw new Error("Failed to fetch properties");
-        return await response.json();
-    } catch (error) {
-        console.error("Error fetching properties:", error);
-        return [];
-    }
+    return apiRequest<Property[]>(`/properties/agency/${agencyId}`);
+}
+
+export async function createProperty(property: PropertyPayload): Promise<Property> {
+    return apiRequest<Property>("/properties", {
+        method: "POST",
+        body: JSON.stringify(property),
+    });
+}
+
+export async function updateProperty(
+    propertyId: number,
+    property: Partial<PropertyPayload>,
+): Promise<Property> {
+    return apiRequest<Property>(`/properties/${propertyId}`, {
+        method: "PATCH",
+        body: JSON.stringify(property),
+    });
 }
 
 export async function fetchAgencies(): Promise<Agency[]> {
-    try {
-        const response = await fetch(`${API_URL}/agencies`);
-        if (!response.ok) throw new Error("Failed to fetch agencies");
-        return await response.json();
-    } catch (error) {
-        console.error("Error fetching agencies:", error);
-        return [];
-    }
+    return apiRequest<Agency[]>("/agencies");
 }
 
-export async function fetchAgency(id: number): Promise<Agency | null> {
-    try {
-        const response = await fetch(`${API_URL}/agencies/${id}`);
-        if (!response.ok) throw new Error("Failed to fetch agency");
-        return await response.json();
-    } catch (error) {
-        console.error("Error fetching agency:", error);
-        return null;
-    }
+export async function fetchAgency(id: number): Promise<Agency> {
+    return apiRequest<Agency>(`/agencies/${id}`);
 }
 
 export async function createUser(user: {
@@ -157,16 +145,53 @@ export async function createUser(user: {
     password?: string;
     role?: "client" | "agent" | "admin";
 }) {
-    try {
-        const response = await fetch(`${API_URL}/users`, {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify(user),
-        });
-        if (!response.ok) throw new Error("Failed to create user");
-        return await response.json();
-    } catch (error) {
-        console.error("Error creating user:", error);
-        return null;
-    }
+    return apiRequest<User>("/users", {
+        method: "POST",
+        body: JSON.stringify(user),
+    });
+}
+
+export async function createVisitRequest(
+    propertyId: number,
+    request: {
+        user_id?: number;
+        name: string;
+        email: string;
+        message: string;
+    },
+) {
+    return apiRequest<VisitRequest>(`/properties/${propertyId}/visit-requests`, {
+        method: "POST",
+        body: JSON.stringify(request),
+    });
+}
+
+export async function fetchVisitRequests(): Promise<VisitRequest[]> {
+    return apiRequest<VisitRequest[]>("/visit-requests");
+}
+
+export async function updateVisitRequest(
+    visitId: number,
+    status: string,
+): Promise<VisitRequest> {
+    return apiRequest<VisitRequest>(`/visit-requests/${visitId}`, {
+        method: "PATCH",
+        body: JSON.stringify({ status }),
+    });
+}
+
+export async function fetchSavedPropertyIds(userId: number): Promise<number[]> {
+    return apiRequest<number[]>(`/users/${userId}/saved-properties`);
+}
+
+export async function savePropertyForUser(userId: number, propertyId: number) {
+    return apiRequest(`/users/${userId}/saved-properties/${propertyId}`, {
+        method: "POST",
+    });
+}
+
+export async function removeSavedPropertyForUser(userId: number, propertyId: number) {
+    return apiRequest<{ removed: boolean }>(`/users/${userId}/saved-properties/${propertyId}`, {
+        method: "DELETE",
+    });
 }

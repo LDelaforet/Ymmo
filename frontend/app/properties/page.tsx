@@ -13,19 +13,29 @@ export default function PropertiesPage() {
     const [query, setQuery] = useState("");
     const [status, setStatus] = useState("all");
     const [maxPrice, setMaxPrice] = useState("all");
+    const [sort, setSort] = useState("newest");
+    const [page, setPage] = useState(1);
+    const [error, setError] = useState("");
+    const pageSize = 6;
 
     useEffect(() => {
         async function loadProperties() {
             setLoading(true);
-            const [propertyData, agentData, agencyData] = await Promise.all([
-                fetchProperties(),
-                fetchAgents(),
-                fetchAgencies(),
-            ]);
-            setProperties(propertyData);
-            setAgents(agentData);
-            setAgencies(agencyData);
-            setLoading(false);
+            setError("");
+            try {
+                const [propertyData, agentData, agencyData] = await Promise.all([
+                    fetchProperties(),
+                    fetchAgents(),
+                    fetchAgencies(),
+                ]);
+                setProperties(propertyData);
+                setAgents(agentData);
+                setAgencies(agencyData);
+            } catch (loadError) {
+                setError(loadError instanceof Error ? loadError.message : "Could not load properties.");
+            } finally {
+                setLoading(false);
+            }
         }
 
         loadProperties();
@@ -37,7 +47,7 @@ export default function PropertiesPage() {
     );
 
     const filteredProperties = useMemo(() => {
-        return properties.filter((property) => {
+        const matches = properties.filter((property) => {
             const price = typeof property.price === "string" ? Number.parseFloat(property.price) : property.price;
             const matchesQuery = `${property.title} ${property.description} ${property.location}`
                 .toLowerCase()
@@ -47,7 +57,16 @@ export default function PropertiesPage() {
 
             return matchesQuery && matchesStatus && matchesPrice;
         });
-    }, [properties, query, status, maxPrice]);
+
+        return [...matches].sort((left, right) => {
+            const leftPrice = typeof left.price === "string" ? Number.parseFloat(left.price) : left.price;
+            const rightPrice = typeof right.price === "string" ? Number.parseFloat(right.price) : right.price;
+
+            if (sort === "price-asc") return leftPrice - rightPrice;
+            if (sort === "price-desc") return rightPrice - leftPrice;
+            return right.property_id - left.property_id;
+        });
+    }, [properties, query, status, maxPrice, sort]);
 
     const findAgent = (property: Property) =>
         agents.find((agent) => agent.agent_id === property.agent_id);
@@ -59,6 +78,8 @@ export default function PropertiesPage() {
         if (lowest === null) return price;
         return price < lowest ? price : lowest;
     }, null);
+    const pageCount = Math.max(1, Math.ceil(filteredProperties.length / pageSize));
+    const paginatedProperties = filteredProperties.slice((page - 1) * pageSize, page * pageSize);
 
     return (
         <>
@@ -94,16 +115,22 @@ export default function PropertiesPage() {
                             </div>
                         </div>
 
-                        <div className="mt-8 grid gap-3 rounded-lg border border-stone-200 bg-stone-50 p-4 md:grid-cols-[1fr_180px_180px]">
+                        <div className="mt-8 grid gap-3 rounded-lg border border-stone-200 bg-stone-50 p-4 md:grid-cols-[1fr_180px_180px_180px]">
                             <input
                                 value={query}
-                                onChange={(event) => setQuery(event.target.value)}
+                                onChange={(event) => {
+                                    setQuery(event.target.value);
+                                    setPage(1);
+                                }}
                                 placeholder="Search by city, title, or feature"
                                 className="min-h-11 rounded-md border border-stone-300 bg-white px-4 text-sm text-stone-950 outline-none transition focus:border-emerald-700"
                             />
                             <select
                                 value={status}
-                                onChange={(event) => setStatus(event.target.value)}
+                                onChange={(event) => {
+                                    setStatus(event.target.value);
+                                    setPage(1);
+                                }}
                                 className="min-h-11 rounded-md border border-stone-300 bg-white px-4 text-sm font-semibold text-stone-800 outline-none transition focus:border-emerald-700"
                             >
                                 {statuses.map((item) => (
@@ -114,7 +141,10 @@ export default function PropertiesPage() {
                             </select>
                             <select
                                 value={maxPrice}
-                                onChange={(event) => setMaxPrice(event.target.value)}
+                                onChange={(event) => {
+                                    setMaxPrice(event.target.value);
+                                    setPage(1);
+                                }}
                                 className="min-h-11 rounded-md border border-stone-300 bg-white px-4 text-sm font-semibold text-stone-800 outline-none transition focus:border-emerald-700"
                             >
                                 <option value="all">Any price</option>
@@ -123,12 +153,28 @@ export default function PropertiesPage() {
                                 <option value="750000">Under $750k</option>
                                 <option value="1000000">Under $1M</option>
                             </select>
+                            <select
+                                value={sort}
+                                onChange={(event) => {
+                                    setSort(event.target.value);
+                                    setPage(1);
+                                }}
+                                className="min-h-11 rounded-md border border-stone-300 bg-white px-4 text-sm font-semibold text-stone-800 outline-none transition focus:border-emerald-700"
+                            >
+                                <option value="newest">Newest first</option>
+                                <option value="price-asc">Price: low to high</option>
+                                <option value="price-desc">Price: high to low</option>
+                            </select>
                         </div>
                     </div>
                 </section>
 
                 <section className="mx-auto max-w-7xl px-4 py-10 sm:px-6">
-                    {loading ? (
+                    {error ? (
+                        <p className="rounded-lg border border-red-200 bg-red-50 p-8 text-center font-semibold text-red-700">
+                            {error}
+                        </p>
+                    ) : loading ? (
                         <p className="rounded-lg border border-stone-200 bg-white p-8 text-center text-stone-600">
                             Loading properties...
                         </p>
@@ -137,16 +183,39 @@ export default function PropertiesPage() {
                             No properties match your search.
                         </p>
                     ) : (
-                        <div className="grid gap-6 md:grid-cols-2 xl:grid-cols-3">
-                            {filteredProperties.map((property) => (
-                                <PropertyCard
-                                    key={property.property_id}
-                                    property={property}
-                                    agent={findAgent(property)}
-                                    agency={findAgency(property)}
-                                />
-                            ))}
-                        </div>
+                        <>
+                            <div className="grid gap-6 md:grid-cols-2 xl:grid-cols-3">
+                                {paginatedProperties.map((property) => (
+                                    <PropertyCard
+                                        key={property.property_id}
+                                        property={property}
+                                        agent={findAgent(property)}
+                                        agency={findAgency(property)}
+                                    />
+                                ))}
+                            </div>
+                            <div className="mt-8 flex items-center justify-center gap-3">
+                                <button
+                                    type="button"
+                                    onClick={() => setPage((current) => Math.max(1, current - 1))}
+                                    disabled={page === 1}
+                                    className="rounded-md border border-stone-300 bg-white px-4 py-2 text-sm font-bold text-stone-800 disabled:opacity-50"
+                                >
+                                    Previous
+                                </button>
+                                <span className="text-sm font-bold text-stone-600">
+                                    Page {page} of {pageCount}
+                                </span>
+                                <button
+                                    type="button"
+                                    onClick={() => setPage((current) => Math.min(pageCount, current + 1))}
+                                    disabled={page === pageCount}
+                                    className="rounded-md border border-stone-300 bg-white px-4 py-2 text-sm font-bold text-stone-800 disabled:opacity-50"
+                                >
+                                    Next
+                                </button>
+                            </div>
+                        </>
                     )}
                 </section>
             </main>

@@ -13,19 +13,26 @@ export default function Home() {
   const [agents, setAgents] = useState<Agent[]>([]);
   const [agencies, setAgencies] = useState<Agency[]>([]);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
 
   useEffect(() => {
     async function loadData() {
       setLoading(true);
-      const [propertyData, agentData, agencyData] = await Promise.all([
-        fetchProperties(),
-        fetchAgents(),
-        fetchAgencies(),
-      ]);
-      setProperties(propertyData);
-      setAgents(agentData);
-      setAgencies(agencyData);
-      setLoading(false);
+      setError("");
+      try {
+        const [propertyData, agentData, agencyData] = await Promise.all([
+          fetchProperties(),
+          fetchAgents(),
+          fetchAgencies(),
+        ]);
+        setProperties(propertyData);
+        setAgents(agentData);
+        setAgencies(agencyData);
+      } catch (loadError) {
+        setError(loadError instanceof Error ? loadError.message : "Could not load listings.");
+      } finally {
+        setLoading(false);
+      }
     }
 
     loadData();
@@ -114,7 +121,11 @@ export default function Home() {
             </Link>
           </div>
 
-          {loading ? (
+          {error ? (
+            <p className="rounded-lg border border-red-200 bg-red-50 p-8 text-center font-semibold text-red-700">
+              {error}
+            </p>
+          ) : loading ? (
             <p className="rounded-lg border border-stone-200 bg-white p-8 text-center text-stone-600">
               Loading properties...
             </p>

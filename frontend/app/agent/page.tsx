@@ -1,12 +1,24 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { FormEvent, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import Navbar from "@/components/Navbar";
-import PropertyCard, { formatPrice } from "@/components/PropertyCard";
+import PropertyCard from "@/components/PropertyCard";
 import { useAuth } from "@/components/AuthProvider";
-import { fetchAgents, fetchAgencies, fetchProperties, type Agent, type Agency, type Property } from "@/lib/api";
+import {
+    createProperty,
+    fetchAgents,
+    fetchAgencies,
+    fetchProperties,
+    fetchVisitRequests,
+    updateProperty,
+    updateVisitRequest,
+    type Agent,
+    type Agency,
+    type Property,
+    type VisitRequest,
+} from "@/lib/api";
 
 export default function AgentOfficePage() {
     const router = useRouter();
@@ -15,6 +27,20 @@ export default function AgentOfficePage() {
     const [agents, setAgents] = useState<Agent[]>([]);
     const [agencies, setAgencies] = useState<Agency[]>([]);
     const [status, setStatus] = useState("all");
+    const [visits, setVisits] = useState<VisitRequest[]>([]);
+    const [selectedLeadProperty, setSelectedLeadProperty] = useState<Property | null>(null);
+    const [error, setError] = useState("");
+    const [notice, setNotice] = useState("");
+    const [newProperty, setNewProperty] = useState({
+        title: "",
+        description: "",
+        price: "",
+        location: "",
+        bedrooms: "2",
+        surface: "60",
+        property_type: "apartment",
+        photo_url: "",
+    });
 
     useEffect(() => {
         if (ready && (!user || !isAgent)) {
@@ -24,14 +50,21 @@ export default function AgentOfficePage() {
 
     useEffect(() => {
         async function loadData() {
-            const [propertyData, agentData, agencyData] = await Promise.all([
-                fetchProperties(),
-                fetchAgents(),
-                fetchAgencies(),
-            ]);
-            setProperties(propertyData);
-            setAgents(agentData);
-            setAgencies(agencyData);
+            setError("");
+            try {
+                const [propertyData, agentData, agencyData, visitData] = await Promise.all([
+                    fetchProperties(),
+                    fetchAgents(),
+                    fetchAgencies(),
+                    fetchVisitRequests(),
+                ]);
+                setProperties(propertyData);
+                setAgents(agentData);
+                setAgencies(agencyData);
+                setVisits(visitData);
+            } catch (loadError) {
+                setError(loadError instanceof Error ? loadError.message : "Could not load the agent office.");
+            }
         }
 
         loadData();
@@ -48,16 +81,90 @@ export default function AgentOfficePage() {
         () => ["all", ...Array.from(new Set(visibleProperties.map((property) => property.status || "available")))],
         [visibleProperties],
     );
-    const totalValue = visibleProperties.reduce((sum, property) => {
-        const price = typeof property.price === "string" ? Number.parseFloat(property.price) : property.price;
-        return sum + (Number.isNaN(price) ? 0 : price);
-    }, 0);
     const availableCount = visibleProperties.filter((property) => property.status !== "sold").length;
 
     const findAgent = (property: Property) =>
         agents.find((agent) => agent.agent_id === property.agent_id);
     const findAgency = (property: Property) =>
         agencies.find((agency) => agency.agency_id === property.agency_id);
+    const visiblePropertyIds = new Set(visibleProperties.map((property) => property.property_id));
+    const visibleVisits = visits.filter((visit) => visiblePropertyIds.has(visit.property_id));
+    const selectedVisits = selectedLeadProperty
+        ? visits.filter((visit) => visit.property_id === selectedLeadProperty.property_id)
+        : [];
+
+    async function handleCreateProperty(event: FormEvent<HTMLFormElement>) {
+        event.preventDefault();
+        setError("");
+        setNotice("");
+
+        const agent = currentAgent || agents[0];
+        const agency = agent
+            ? agencies.find((item) => item.agency_id === agent.agency_id) || agencies[0]
+            : agencies[0];
+
+        if (!agent || !agency) {
+            setError("Create an agent and agency before adding a property.");
+            return;
+        }
+
+        try {
+            const created = await createProperty({
+                title: newProperty.title,
+                description: newProperty.description,
+                price: Number(newProperty.price),
+                location: newProperty.location,
+                status: "available",
+                bedrooms: Number(newProperty.bedrooms),
+                surface: Number(newProperty.surface),
+                property_type: newProperty.property_type,
+                photo_url: newProperty.photo_url,
+                agency_id: agency.agency_id,
+                agent_id: agent.agent_id,
+            });
+            setProperties((current) => [created, ...current]);
+            setNewProperty({
+                title: "",
+                description: "",
+                price: "",
+                location: "",
+                bedrooms: "2",
+                surface: "60",
+                property_type: "apartment",
+                photo_url: "",
+            });
+            setNotice("Property created and published.");
+        } catch (createError) {
+            setError(createError instanceof Error ? createError.message : "Could not create the property.");
+        }
+    }
+
+    async function handleStatusChange(propertyId: number, nextStatus: string) {
+        setError("");
+        try {
+            const updated = await updateProperty(propertyId, { status: nextStatus });
+            setProperties((current) =>
+                current.map((property) =>
+                    property.property_id === propertyId ? updated : property,
+                ),
+            );
+            setNotice("Property status updated.");
+        } catch (updateError) {
+            setError(updateError instanceof Error ? updateError.message : "Could not update the status.");
+        }
+    }
+
+    async function handleVisitStatus(visitId: number, nextStatus: string) {
+        setError("");
+        try {
+            const updated = await updateVisitRequest(visitId, nextStatus);
+            setVisits((current) =>
+                current.map((visit) => (visit.visit_id === visitId ? updated : visit)),
+            );
+        } catch (updateError) {
+            setError(updateError instanceof Error ? updateError.message : "Could not update this lead.");
+        }
+    }
 
     if (!ready || !user) {
         return (
@@ -99,6 +206,17 @@ export default function AgentOfficePage() {
                 </section>
 
                 <section className="mx-auto max-w-7xl px-4 py-10 sm:px-6">
+                    {error ? (
+                        <p className="mb-6 rounded-lg border border-red-200 bg-red-50 p-4 text-sm font-semibold text-red-700">
+                            {error}
+                        </p>
+                    ) : null}
+                    {notice ? (
+                        <p className="mb-6 rounded-lg border border-emerald-200 bg-emerald-50 p-4 text-sm font-semibold text-emerald-700">
+                            {notice}
+                        </p>
+                    ) : null}
+
                     <div className="grid gap-4 md:grid-cols-4">
                         <div className="rounded-lg border border-stone-200 bg-white p-5">
                             <p className="text-sm font-bold uppercase tracking-wide text-stone-500">
@@ -125,11 +243,92 @@ export default function AgentOfficePage() {
                         </div>
                         <div className="rounded-lg border border-stone-200 bg-white p-5">
                             <p className="text-sm font-bold uppercase tracking-wide text-stone-500">
-                                Portfolio value
+                                Open leads
                             </p>
-                            <p className="mt-2 text-3xl font-black text-stone-950">{formatPrice(totalValue)}</p>
+                            <p className="mt-2 text-3xl font-black text-stone-950">
+                                {visibleVisits.filter((visit) => visit.status !== "closed").length}
+                            </p>
                         </div>
                     </div>
+
+                    <form
+                        onSubmit={handleCreateProperty}
+                        className="mt-8 grid gap-4 rounded-lg border border-stone-200 bg-white p-5 lg:grid-cols-4"
+                    >
+                        <div className="lg:col-span-4">
+                            <h2 className="text-2xl font-black text-stone-950">Create a property</h2>
+                            <p className="mt-1 text-sm text-stone-600">
+                                Add concrete details and a photo URL so buyers can compare listings.
+                            </p>
+                        </div>
+                        <input
+                            value={newProperty.title}
+                            onChange={(event) => setNewProperty((current) => ({ ...current, title: event.target.value }))}
+                            placeholder="Title"
+                            className="min-h-11 rounded-md border border-stone-300 px-3 text-sm text-stone-950"
+                            required
+                        />
+                        <input
+                            value={newProperty.location}
+                            onChange={(event) => setNewProperty((current) => ({ ...current, location: event.target.value }))}
+                            placeholder="Location"
+                            className="min-h-11 rounded-md border border-stone-300 px-3 text-sm text-stone-950"
+                            required
+                        />
+                        <input
+                            type="number"
+                            value={newProperty.price}
+                            onChange={(event) => setNewProperty((current) => ({ ...current, price: event.target.value }))}
+                            placeholder="Price"
+                            className="min-h-11 rounded-md border border-stone-300 px-3 text-sm text-stone-950"
+                            required
+                        />
+                        <select
+                            value={newProperty.property_type}
+                            onChange={(event) => setNewProperty((current) => ({ ...current, property_type: event.target.value }))}
+                            className="min-h-11 rounded-md border border-stone-300 px-3 text-sm font-semibold text-stone-800"
+                        >
+                            <option value="apartment">Apartment</option>
+                            <option value="house">House</option>
+                            <option value="studio">Studio</option>
+                            <option value="loft">Loft</option>
+                        </select>
+                        <input
+                            type="number"
+                            value={newProperty.bedrooms}
+                            onChange={(event) => setNewProperty((current) => ({ ...current, bedrooms: event.target.value }))}
+                            placeholder="Rooms"
+                            className="min-h-11 rounded-md border border-stone-300 px-3 text-sm text-stone-950"
+                            required
+                        />
+                        <input
+                            type="number"
+                            value={newProperty.surface}
+                            onChange={(event) => setNewProperty((current) => ({ ...current, surface: event.target.value }))}
+                            placeholder="Surface m2"
+                            className="min-h-11 rounded-md border border-stone-300 px-3 text-sm text-stone-950"
+                            required
+                        />
+                        <input
+                            value={newProperty.photo_url}
+                            onChange={(event) => setNewProperty((current) => ({ ...current, photo_url: event.target.value }))}
+                            placeholder="Photo URL"
+                            className="min-h-11 rounded-md border border-stone-300 px-3 text-sm text-stone-950 lg:col-span-2"
+                        />
+                        <textarea
+                            value={newProperty.description}
+                            onChange={(event) => setNewProperty((current) => ({ ...current, description: event.target.value }))}
+                            placeholder="Description"
+                            className="min-h-24 rounded-md border border-stone-300 px-3 py-2 text-sm text-stone-950 lg:col-span-3"
+                            required
+                        />
+                        <button
+                            type="submit"
+                            className="min-h-11 rounded-md bg-emerald-700 px-4 py-3 text-sm font-bold text-white transition hover:bg-emerald-800"
+                        >
+                            Publish property
+                        </button>
+                    </form>
 
                     <div className="mt-8 flex flex-col justify-between gap-4 rounded-lg border border-stone-200 bg-white p-4 sm:flex-row sm:items-center">
                         <div>
@@ -160,6 +359,9 @@ export default function AgentOfficePage() {
                                 property={property}
                                 agent={findAgent(property)}
                                 agency={findAgency(property)}
+                                leadCount={visits.filter((visit) => visit.property_id === property.property_id).length}
+                                onReviewLeads={setSelectedLeadProperty}
+                                onStatusChange={handleStatusChange}
                                 showAgentTools
                             />
                         ))}
@@ -169,6 +371,62 @@ export default function AgentOfficePage() {
                         <p className="mt-6 rounded-lg border border-stone-200 bg-white p-8 text-center text-stone-600">
                             No listings match this status.
                         </p>
+                    ) : null}
+
+                    {selectedLeadProperty ? (
+                        <div className="fixed inset-0 z-50 grid place-items-center bg-stone-950/60 p-4">
+                            <div className="max-h-[85vh] w-full max-w-2xl overflow-auto rounded-lg bg-white p-6 shadow-xl">
+                                <div className="flex items-start justify-between gap-4">
+                                    <div>
+                                        <h2 className="text-2xl font-black text-stone-950">
+                                            Leads for {selectedLeadProperty.title}
+                                        </h2>
+                                        <p className="mt-1 text-sm text-stone-600">
+                                            Review visit requests and update their status.
+                                        </p>
+                                    </div>
+                                    <button
+                                        type="button"
+                                        onClick={() => setSelectedLeadProperty(null)}
+                                        className="rounded-md border border-stone-300 px-3 py-2 text-sm font-bold text-stone-800"
+                                    >
+                                        Close
+                                    </button>
+                                </div>
+
+                                <div className="mt-5 space-y-3">
+                                    {selectedVisits.length === 0 ? (
+                                        <p className="rounded-md bg-stone-50 p-4 text-sm text-stone-600">
+                                            No visit requests for this property yet.
+                                        </p>
+                                    ) : (
+                                        selectedVisits.map((visit) => (
+                                            <div key={visit.visit_id} className="rounded-md border border-stone-200 p-4">
+                                                <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                                                    <div>
+                                                        <p className="font-black text-stone-950">{visit.name}</p>
+                                                        <p className="text-sm text-stone-600">{visit.email}</p>
+                                                        <p className="mt-2 text-sm leading-6 text-stone-700">
+                                                            {visit.message || "No message provided."}
+                                                        </p>
+                                                    </div>
+                                                    <select
+                                                        value={visit.status}
+                                                        onChange={(event) => handleVisitStatus(visit.visit_id, event.target.value)}
+                                                        className="min-h-10 rounded-md border border-stone-300 px-3 text-sm font-semibold text-stone-800"
+                                                    >
+                                                        <option value="new">New</option>
+                                                        <option value="contacted">Contacted</option>
+                                                        <option value="scheduled">Scheduled</option>
+                                                        <option value="closed">Closed</option>
+                                                    </select>
+                                                </div>
+                                            </div>
+                                        ))
+                                    )}
+                                </div>
+                            </div>
+                        </div>
                     ) : null}
                 </section>
             </main>

@@ -3,17 +3,29 @@ load_dotenv()
 
 from fastapi import FastAPI, Depends, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
+from sqlalchemy import inspect, text
 from sqlalchemy.orm import Session
-from typing import List
 from database import engine, get_db
 import models
-from schemas import AgentSchema, AuthUser, LoginRequest, UserBase, UserCreate
+from schemas import (
+    ForgotPasswordRequest,
+    LoginRequest,
+    PropertyCreate,
+    PropertyUpdate,
+    UserCreate,
+    VisitRequestCreate,
+    VisitStatusUpdate,
+)
+
+from fastapi.staticfiles import StaticFiles
 
 app = FastAPI(
     title="Ymmo API",
     description="A real estate management API for managing properties, agents, agencies, and users.",
     version="1.0.0"
 )
+
+app.mount("/backend-ymmo/assets", StaticFiles(directory="assets"), name="assets")
 
 app.add_middleware(
     CORSMiddleware,
@@ -26,8 +38,30 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Create tables if they don't exist
 models.Base.metadata.create_all(bind=engine)
+
+def ensure_property_columns():
+    inspector = inspect(engine)
+    if "properties" not in inspector.get_table_names():
+        return
+
+    existing_columns = {
+        column["name"] for column in inspector.get_columns("properties")
+    }
+    column_statements = {
+        "bedrooms": "ALTER TABLE properties ADD COLUMN bedrooms INTEGER DEFAULT 1",
+        "surface": "ALTER TABLE properties ADD COLUMN surface INTEGER DEFAULT 45",
+        "property_type": "ALTER TABLE properties ADD COLUMN property_type VARCHAR(50) DEFAULT 'apartment'",
+        "photo_url": "ALTER TABLE properties ADD COLUMN photo_url VARCHAR(1000) DEFAULT ''",
+        "created_at": "ALTER TABLE properties ADD COLUMN created_at DATETIME DEFAULT CURRENT_TIMESTAMP",
+    }
+
+    with engine.begin() as connection:
+        for column_name, statement in column_statements.items():
+            if column_name not in existing_columns:
+                connection.execute(text(statement))
+
+ensure_property_columns()
 
 @app.get("/", tags=["Home"])
 def home():
@@ -38,7 +72,7 @@ def home():
 @app.post("/auth/login", tags=["Auth"], summary="Log in with email and password")
 def login(credentials: LoginRequest, db: Session = Depends(get_db)):
     """Return the matching user for the frontend session."""
-    user = db.query(models.User).filter(models.User.email == credentials.email).first()
+    user = db.query(models.User).filter_by(email=credentials.email).first()
     if not user:
         raise HTTPException(status_code=401, detail="Invalid email or password")
 
@@ -46,7 +80,7 @@ def login(credentials: LoginRequest, db: Session = Depends(get_db)):
     password_matches = user.password == credentials.password
     legacy_dev_login = legacy_password and credentials.password in ("", "password")
 
-    if not password_matches and not legacy_dev_login:
+    if not password_matches and not legacy_dev_login:  # type: ignore
         raise HTTPException(status_code=401, detail="Invalid email or password")
 
     return {
@@ -55,6 +89,14 @@ def login(credentials: LoginRequest, db: Session = Depends(get_db)):
         "last_name": user.last_name,
         "email": user.email,
         "role": user.role,
+    }
+
+@app.post("/auth/forgot-password", tags=["Auth"], summary="Start password recovery")
+def forgot_password(payload: ForgotPasswordRequest, db: Session = Depends(get_db)):
+    """Return a neutral recovery response so account existence is not leaked."""
+    db.query(models.User).filter(models.User.email == payload.email).first()
+    return {
+        "message": "If an account exists for this email, password reset instructions have been sent."
     }
 
 # ===== USERS =====
@@ -71,6 +113,46 @@ def get_user(user_id: int, db: Session = Depends(get_db)):
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
     return user
+
+@app.get("/users/{user_id}/saved-properties", tags=["Users"], summary="Get saved property IDs")
+def get_saved_properties(user_id: int, db: Session = Depends(get_db)):
+    saved_rows = db.query(models.SavedProperty).filter(
+        models.SavedProperty.user_id == user_id
+    ).all()
+    return [row.property_id for row in saved_rows]
+
+@app.post("/users/{user_id}/saved-properties/{property_id}", tags=["Users"], summary="Save a property")
+def save_property(user_id: int, property_id: int, db: Session = Depends(get_db)):
+    user = db.query(models.User).filter(models.User.id == user_id).first()
+    prop = db.query(models.Property).filter(models.Property.property_id == property_id).first()
+    if not user or not prop:
+        raise HTTPException(status_code=404, detail="User or property not found")
+
+    existing = db.query(models.SavedProperty).filter(
+        models.SavedProperty.user_id == user_id,
+        models.SavedProperty.property_id == property_id,
+    ).first()
+    if existing:
+        return existing
+
+    saved = models.SavedProperty(user_id=user_id, property_id=property_id)
+    db.add(saved)
+    db.commit()
+    db.refresh(saved)
+    return saved
+
+@app.delete("/users/{user_id}/saved-properties/{property_id}", tags=["Users"], summary="Remove a saved property")
+def remove_saved_property(user_id: int, property_id: int, db: Session = Depends(get_db)):
+    saved = db.query(models.SavedProperty).filter(
+        models.SavedProperty.user_id == user_id,
+        models.SavedProperty.property_id == property_id,
+    ).first()
+    if not saved:
+        return {"removed": False}
+
+    db.delete(saved)
+    db.commit()
+    return {"removed": True}
 
 @app.post("/users", tags=["Users"], summary="Create a new user")
 def create_user(user: UserCreate, db: Session = Depends(get_db)):
@@ -114,6 +196,20 @@ def get_properties(db: Session = Depends(get_db)):
     properties = db.query(models.Property).all()
     return properties
 
+@app.get("/properties/agency/{agency_id}", tags=["Properties"], summary="Get properties by agency")
+def get_properties_by_agency(agency_id: int, db: Session = Depends(get_db)):
+    """Retrieve all properties managed by a specific agency."""
+    properties = db.query(models.Property).filter(models.Property.agency_id == agency_id).all()
+    return properties
+
+@app.post("/properties", tags=["Properties"], summary="Create a property")
+def create_property(property_data: PropertyCreate, db: Session = Depends(get_db)):
+    prop = models.Property(**property_data.dict())
+    db.add(prop)
+    db.commit()
+    db.refresh(prop)
+    return prop
+
 @app.get("/properties/{property_id}", tags=["Properties"], summary="Get property by ID")
 def get_property(property_id: int, db: Session = Depends(get_db)):
     """Retrieve a specific property by its ID."""
@@ -122,11 +218,45 @@ def get_property(property_id: int, db: Session = Depends(get_db)):
         raise HTTPException(status_code=404, detail="Property not found")
     return prop
 
-@app.get("/properties/agency/{agency_id}", tags=["Properties"], summary="Get properties by agency")
-def get_properties_by_agency(agency_id: int, db: Session = Depends(get_db)):
-    """Retrieve all properties managed by a specific agency."""
-    properties = db.query(models.Property).filter(models.Property.agency_id == agency_id).all()
-    return properties
+@app.patch("/properties/{property_id}", tags=["Properties"], summary="Update a property")
+def update_property(property_id: int, property_data: PropertyUpdate, db: Session = Depends(get_db)):
+    prop = db.query(models.Property).filter(models.Property.property_id == property_id).first()
+    if not prop:
+        raise HTTPException(status_code=404, detail="Property not found")
+
+    for field, value in property_data.dict(exclude_unset=True).items():
+        setattr(prop, field, value)
+
+    db.commit()
+    db.refresh(prop)
+    return prop
+
+@app.post("/properties/{property_id}/visit-requests", tags=["Properties"], summary="Request a visit")
+def create_visit_request(property_id: int, visit: VisitRequestCreate, db: Session = Depends(get_db)):
+    prop = db.query(models.Property).filter(models.Property.property_id == property_id).first()
+    if not prop:
+        raise HTTPException(status_code=404, detail="Property not found")
+
+    request = models.VisitRequest(property_id=property_id, **visit.dict())
+    db.add(request)
+    db.commit()
+    db.refresh(request)
+    return request
+
+@app.get("/visit-requests", tags=["Visits"], summary="Get visit requests")
+def get_visit_requests(db: Session = Depends(get_db)):
+    return db.query(models.VisitRequest).order_by(models.VisitRequest.created_at.desc()).all()
+
+@app.patch("/visit-requests/{visit_id}", tags=["Visits"], summary="Update a visit request")
+def update_visit_request(visit_id: int, payload: VisitStatusUpdate, db: Session = Depends(get_db)):
+    request = db.query(models.VisitRequest).filter(models.VisitRequest.visit_id == visit_id).first()
+    if not request:
+        raise HTTPException(status_code=404, detail="Visit request not found")
+
+    request.status = payload.status  # type: ignore
+    db.commit()
+    db.refresh(request)
+    return request
 
 # ===== AGENCIES =====
 @app.get("/agencies", tags=["Agencies"], summary="Get all agencies")

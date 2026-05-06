@@ -27,6 +27,11 @@ class Property(Base):
     price = Column(Numeric(15, 2))
     location = Column(String(255))
     status = Column(String(50), default="available")
+    bedrooms = Column(Integer, default=1)
+    surface = Column(Integer, default=45)
+    property_type = Column(String(50), default="apartment")
+    photo_url = Column(String(1000), default="")
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
     agency_id = Column(Integer, ForeignKey("agencies.agency_id"))
     agent_id = Column(Integer, ForeignKey("agents.agent_id"))
 
@@ -39,3 +44,21 @@ class Agent(Base):
     is_active = Column(Boolean, default=True)
     user = relationship("User") 
     agency = relationship("Agency")
+
+class VisitRequest(Base):
+    __tablename__ = "visit_requests"
+    visit_id = Column(Integer, primary_key=True, index=True)
+    property_id = Column(Integer, ForeignKey("properties.property_id"))
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=True)
+    name = Column(String(200))
+    email = Column(String(200))
+    message = Column(String(1000), default="")
+    status = Column(String(50), default="new")
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+class SavedProperty(Base):
+    __tablename__ = "saved_properties"
+    saved_id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, ForeignKey("users.id"))
+    property_id = Column(Integer, ForeignKey("properties.property_id"))
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
