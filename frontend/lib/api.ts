@@ -52,6 +52,33 @@ export interface VisitRequest {
     created_at?: string;
 }
 
+export interface Transaction {
+    transaction_id: number;
+    client_id: number;
+    property_id?: number | null;
+    agent_id?: number | null;
+    agency_id?: number | null;
+    transaction_type: string;
+    status: string;
+    budget?: number | string | null;
+    notes: string;
+    created_at?: string;
+    updated_at?: string;
+}
+
+export interface MarketOverview {
+    total_properties: number;
+    available_properties: number;
+    sold_properties: number;
+    avg_price: number;
+    total_transactions: number;
+    transaction_completion_ratio: number;
+    market_signal: string;
+    city_distribution: Record<string, number>;
+    property_type_distribution: Record<string, number>;
+    transaction_status_distribution: Record<string, number>;
+}
+
 export type PropertyPayload = Omit<Property, "property_id" | "created_at">;
 
 async function apiRequest<T>(path: string, options: RequestInit = {}): Promise<T> {
@@ -107,6 +134,10 @@ export async function fetchProperties(): Promise<Property[]> {
 
 export async function fetchProperty(id: number): Promise<Property> {
     return apiRequest<Property>(`/properties/${id}`);
+}
+
+export async function fetchPropertyGallery(id: number): Promise<string[]> {
+    return apiRequest<string[]>(`/properties/${id}/gallery`);
 }
 
 export async function fetchPropertiesByAgency(agencyId: number): Promise<Property[]> {
@@ -168,6 +199,52 @@ export async function createVisitRequest(
 
 export async function fetchVisitRequests(): Promise<VisitRequest[]> {
     return apiRequest<VisitRequest[]>("/visit-requests");
+}
+
+export async function fetchTransactions(): Promise<Transaction[]> {
+    return apiRequest<Transaction[]>("/transactions");
+}
+
+export async function fetchUserTransactions(userId: number): Promise<Transaction[]> {
+    return apiRequest<Transaction[]>(`/users/${userId}/transactions`);
+}
+
+export async function createTransaction(payload: {
+    client_id: number;
+    property_id?: number;
+    agent_id?: number;
+    agency_id?: number;
+    transaction_type: string;
+    status?: string;
+    budget?: number;
+    notes?: string;
+}) {
+    return apiRequest<Transaction>("/transactions", {
+        method: "POST",
+        body: JSON.stringify(payload),
+    });
+}
+
+export async function updateTransaction(
+    transactionId: number,
+    payload: Partial<{
+        property_id: number;
+        agent_id: number;
+        agency_id: number;
+        transaction_type: string;
+        status: string;
+        budget: number;
+        notes: string;
+    }>,
+): Promise<Transaction> {
+    return apiRequest<Transaction>(`/transactions/${transactionId}`, {
+        method: "PATCH",
+        body: JSON.stringify(payload),
+    });
+}
+
+export async function fetchMarketOverview(): Promise<MarketOverview> {
+    return apiRequest<MarketOverview>("/analytics/market-overview");
 }
 
 export async function updateVisitRequest(

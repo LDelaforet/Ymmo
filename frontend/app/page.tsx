@@ -53,11 +53,11 @@ export default function Home() {
   return (
     <>
       <Navbar />
-      <main className="min-h-screen bg-stone-50">
-        <section className="border-b border-stone-200 bg-white">
+      <main className="min-h-screen bg-[#f7f2eb]">
+        <section className="border-b border-[#e5d8c8] bg-[#fffaf3]">
           <div className="mx-auto grid max-w-7xl gap-10 px-4 py-12 sm:px-6 lg:grid-cols-[1.05fr_0.95fr] lg:items-center lg:py-16">
             <div className="max-w-2xl">
-              <p className="mb-4 text-sm font-bold uppercase tracking-wide text-emerald-700">
+              <p className="mb-4 text-sm font-bold uppercase tracking-wide text-[#8b6b4f]">
                 Buy, rent, and manage with Ymmo
               </p>
               <h1 className="text-4xl font-black leading-tight text-stone-950 sm:text-5xl">
@@ -69,39 +69,39 @@ export default function Home() {
               <div className="mt-8 flex flex-wrap gap-3">
                 <Link
                   href="/properties"
-                  className="rounded-md bg-emerald-700 px-5 py-3 text-sm font-bold text-white transition hover:bg-emerald-800"
+                  className="rounded-md bg-[#8b6b4f] px-5 py-3 text-sm font-bold text-white transition hover:bg-[#775a43]"
                 >
                   Browse properties
                 </Link>
                 <Link
                   href={user ? (isAgent ? "/agent" : "/dashboard") : "/login"}
-                  className="rounded-md border border-stone-300 px-5 py-3 text-sm font-bold text-stone-900 transition hover:bg-stone-100"
+                  className="rounded-md border border-[#d9c7b3] bg-[#fffaf3] px-5 py-3 text-sm font-bold text-[#2f241f] transition hover:bg-[#efe4d6]"
                 >
                   {user ? "Open dashboard" : "Login or register"}
                 </Link>
               </div>
             </div>
 
-            <div className="overflow-hidden rounded-lg border border-stone-200 bg-stone-950 shadow-xl">
-              <div className="h-72 bg-[linear-gradient(135deg,#064e3b_0%,#1c1917_45%,#d97706_100%)] p-6 sm:h-96">
+            <div className="overflow-hidden rounded-lg border border-[#e5d8c8] bg-[#f3e9dc] shadow-xl">
+              <div className="h-72 bg-[linear-gradient(135deg,#f6ede3_0%,#e8d8c5_45%,#d5b99a_100%)] p-6 sm:h-96">
                 <div className="grid h-full grid-cols-5 grid-rows-4 gap-3">
                   <div className="col-span-3 row-span-4 rounded-md bg-white/15 backdrop-blur" />
                   <div className="col-span-2 row-span-2 rounded-md bg-white/25 backdrop-blur" />
-                  <div className="col-span-2 row-span-2 rounded-md bg-amber-300/70" />
+                  <div className="col-span-2 row-span-2 rounded-md bg-[#c9a889]/70" />
                 </div>
               </div>
-              <div className="grid grid-cols-3 border-t border-white/10 bg-stone-950 text-white">
+              <div className="grid grid-cols-3 border-t border-[#e5d8c8] bg-[#f9f1e7] text-[#2f241f]">
                 <div className="p-4">
                   <p className="text-2xl font-black">{properties.length}</p>
-                  <p className="text-xs text-stone-300">Listings</p>
+                  <p className="text-xs text-[#7a6553]">Listings</p>
                 </div>
-                <div className="border-x border-white/10 p-4">
+                <div className="border-x border-[#e5d8c8] p-4">
                   <p className="text-2xl font-black">{availableCount}</p>
-                  <p className="text-xs text-stone-300">Available</p>
+                  <p className="text-xs text-[#7a6553]">Available</p>
                 </div>
                 <div className="p-4">
                   <p className="text-2xl font-black">{cities}</p>
-                  <p className="text-xs text-stone-300">Markets</p>
+                  <p className="text-xs text-[#7a6553]">Markets</p>
                 </div>
               </div>
             </div>
@@ -116,7 +116,7 @@ export default function Home() {
               </p>
               <h2 className="mt-1 text-3xl font-black text-stone-950">Properties ready to visit</h2>
             </div>
-            <Link href="/properties" className="text-sm font-bold text-emerald-700 hover:text-emerald-900">
+            <Link href="/properties" className="text-sm font-bold text-[#8b6b4f] hover:text-[#6d523d]">
               View all listings
             </Link>
           </div>

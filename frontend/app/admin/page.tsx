@@ -7,11 +7,15 @@ import { useAuth } from "@/components/AuthProvider";
 import {
     fetchAgencies,
     fetchAgents,
+    fetchMarketOverview,
     fetchProperties,
+    fetchTransactions,
     fetchUsers,
     type Agency,
     type Agent,
+    type MarketOverview,
     type Property,
+    type Transaction,
     type User,
 } from "@/lib/api";
 
@@ -22,6 +26,8 @@ export default function AdminPage() {
     const [agents, setAgents] = useState<Agent[]>([]);
     const [agencies, setAgencies] = useState<Agency[]>([]);
     const [properties, setProperties] = useState<Property[]>([]);
+    const [transactions, setTransactions] = useState<Transaction[]>([]);
+    const [overview, setOverview] = useState<MarketOverview | null>(null);
     const [error, setError] = useState("");
 
     useEffect(() => {
@@ -34,16 +40,20 @@ export default function AdminPage() {
         async function loadAdminData() {
             setError("");
             try {
-                const [userData, agentData, agencyData, propertyData] = await Promise.all([
+                const [userData, agentData, agencyData, propertyData, transactionData, overviewData] = await Promise.all([
                     fetchUsers(),
                     fetchAgents(),
                     fetchAgencies(),
                     fetchProperties(),
+                    fetchTransactions(),
+                    fetchMarketOverview(),
                 ]);
                 setUsers(userData);
                 setAgents(agentData);
                 setAgencies(agencyData);
                 setProperties(propertyData);
+                setTransactions(transactionData);
+                setOverview(overviewData);
             } catch (loadError) {
                 setError(loadError instanceof Error ? loadError.message : "Could not load admin data.");
             }
@@ -96,6 +106,7 @@ export default function AdminPage() {
                             ["Agents", agents.length],
                             ["Agencies", agencies.length],
                             ["Properties", properties.length],
+                            ["Transactions", transactions.length],
                         ].map(([label, value]) => (
                             <div key={label} className="rounded-lg border border-stone-200 bg-white p-5">
                                 <p className="text-sm font-bold uppercase tracking-wide text-stone-500">
@@ -104,6 +115,27 @@ export default function AdminPage() {
                                 <p className="mt-2 text-3xl font-black text-stone-950">{value}</p>
                             </div>
                         ))}
+                    </div>
+
+                    <div className="mt-8 grid gap-4 md:grid-cols-3">
+                        <div className="rounded-lg border border-stone-200 bg-white p-5">
+                            <p className="text-sm font-bold uppercase tracking-wide text-stone-500">Market signal</p>
+                            <p className="mt-2 text-2xl font-black capitalize text-stone-950">
+                                {overview?.market_signal || "n/a"}
+                            </p>
+                        </div>
+                        <div className="rounded-lg border border-stone-200 bg-white p-5">
+                            <p className="text-sm font-bold uppercase tracking-wide text-stone-500">Avg price</p>
+                            <p className="mt-2 text-2xl font-black text-stone-950">
+                                {overview ? Math.round(overview.avg_price).toLocaleString() : "-"}
+                            </p>
+                        </div>
+                        <div className="rounded-lg border border-stone-200 bg-white p-5">
+                            <p className="text-sm font-bold uppercase tracking-wide text-stone-500">Completion ratio</p>
+                            <p className="mt-2 text-2xl font-black text-stone-950">
+                                {overview ? `${Math.round(overview.transaction_completion_ratio * 100)}%` : "-"}
+                            </p>
+                        </div>
                     </div>
 
                     <div className="mt-8 overflow-hidden rounded-lg border border-stone-200 bg-white">

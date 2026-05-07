@@ -7,15 +7,18 @@ import Navbar from "@/components/Navbar";
 import PropertyCard from "@/components/PropertyCard";
 import { useAuth } from "@/components/AuthProvider";
 import {
+    createTransaction,
     fetchAgents,
     fetchAgencies,
     fetchProperties,
     fetchSavedPropertyIds,
+    fetchUserTransactions,
     removeSavedPropertyForUser,
     savePropertyForUser,
     type Agent,
     type Agency,
     type Property,
+    type Transaction,
 } from "@/lib/api";
 
 export default function ClientDashboardPage() {
@@ -25,6 +28,11 @@ export default function ClientDashboardPage() {
     const [agents, setAgents] = useState<Agent[]>([]);
     const [agencies, setAgencies] = useState<Agency[]>([]);
     const [savedIds, setSavedIds] = useState<number[]>([]);
+    const [transactions, setTransactions] = useState<Transaction[]>([]);
+    const [requestType, setRequestType] = useState("purchase");
+    const [requestPropertyId, setRequestPropertyId] = useState("");
+    const [requestBudget, setRequestBudget] = useState("");
+    const [requestNotes, setRequestNotes] = useState("");
     const [error, setError] = useState("");
 
     useEffect(() => {
@@ -62,6 +70,15 @@ export default function ClientDashboardPage() {
             });
     }, [user]);
 
+    useEffect(() => {
+        if (!user) return;
+        fetchUserTransactions(user.id)
+            .then(setTransactions)
+            .catch((loadError) => {
+                setError(loadError instanceof Error ? loadError.message : "Could not load your transactions.");
+            });
+    }, [user]);
+
     async function toggleSaved(propertyId: number) {
         if (!user) return;
         const isSaved = savedIds.includes(propertyId);
@@ -78,6 +95,27 @@ export default function ClientDashboardPage() {
         } catch (saveError) {
             setSavedIds(savedIds);
             setError(saveError instanceof Error ? saveError.message : "Could not update saved properties.");
+        }
+    }
+
+    async function handleCreateTransaction() {
+        if (!user) return;
+        setError("");
+        try {
+            const created = await createTransaction({
+                client_id: user.id,
+                transaction_type: requestType,
+                property_id: requestPropertyId ? Number(requestPropertyId) : undefined,
+                budget: requestBudget ? Number(requestBudget) : undefined,
+                notes: requestNotes,
+                status: "new",
+            });
+            setTransactions((current) => [created, ...current]);
+            setRequestPropertyId("");
+            setRequestBudget("");
+            setRequestNotes("");
+        } catch (createError) {
+            setError(createError instanceof Error ? createError.message : "Could not create your request.");
         }
     }
 
@@ -216,6 +254,88 @@ export default function ClientDashboardPage() {
                                     ))}
                                 </div>
                             )}
+                        </section>
+                        <section>
+                            <h2 className="mb-4 text-2xl font-black text-stone-950">Purchase or sale requests</h2>
+                            <div className="rounded-lg border border-stone-200 bg-white p-5">
+                                <p className="text-sm text-stone-600">
+                                    Create a request and follow each step of your transaction in real time.
+                                </p>
+                                <div className="mt-4 grid gap-3 lg:grid-cols-4">
+                                    <select
+                                        value={requestType}
+                                        onChange={(event) => setRequestType(event.target.value)}
+                                        className="min-h-11 rounded-md border border-stone-300 px-3 text-sm"
+                                    >
+                                        <option value="purchase">Purchase</option>
+                                        <option value="sale">Sale</option>
+                                    </select>
+                                    <select
+                                        value={requestPropertyId}
+                                        onChange={(event) => setRequestPropertyId(event.target.value)}
+                                        className="min-h-11 rounded-md border border-stone-300 px-3 text-sm"
+                                    >
+                                        <option value="">No property selected</option>
+                                        {properties.map((property) => (
+                                            <option key={property.property_id} value={property.property_id}>
+                                                {property.title}
+                                            </option>
+                                        ))}
+                                    </select>
+                                    <input
+                                        type="number"
+                                        value={requestBudget}
+                                        onChange={(event) => setRequestBudget(event.target.value)}
+                                        placeholder="Budget"
+                                        className="min-h-11 rounded-md border border-stone-300 px-3 text-sm"
+                                    />
+                                    <button
+                                        type="button"
+                                        onClick={handleCreateTransaction}
+                                        className="min-h-11 rounded-md bg-emerald-700 px-4 text-sm font-bold text-white"
+                                    >
+                                        Submit request
+                                    </button>
+                                </div>
+                                <textarea
+                                    value={requestNotes}
+                                    onChange={(event) => setRequestNotes(event.target.value)}
+                                    placeholder="Tell the agency about your project"
+                                    className="mt-3 min-h-24 w-full rounded-md border border-stone-300 px-3 py-2 text-sm"
+                                />
+                            </div>
+
+                            <div className="mt-4 overflow-hidden rounded-lg border border-stone-200 bg-white">
+                                <table className="w-full min-w-160 text-left text-sm">
+                                    <thead className="bg-stone-50 text-xs font-bold uppercase tracking-wide text-stone-500">
+                                        <tr>
+                                            <th className="px-5 py-3">Type</th>
+                                            <th className="px-5 py-3">Status</th>
+                                            <th className="px-5 py-3">Budget</th>
+                                            <th className="px-5 py-3">Notes</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody className="divide-y divide-stone-100">
+                                        {transactions.map((item) => (
+                                            <tr key={item.transaction_id}>
+                                                <td className="px-5 py-3 font-semibold capitalize text-stone-900">
+                                                    {item.transaction_type}
+                                                </td>
+                                                <td className="px-5 py-3 font-bold capitalize text-stone-800">
+                                                    {item.status.replaceAll("_", " ")}
+                                                </td>
+                                                <td className="px-5 py-3 text-stone-600">
+                                                    {item.budget ? `${item.budget}` : "-"}
+                                                </td>
+                                                <td className="px-5 py-3 text-stone-600">{item.notes || "-"}</td>
+                                            </tr>
+                                        ))}
+                                    </tbody>
+                                </table>
+                                {transactions.length === 0 ? (
+                                    <p className="p-4 text-sm text-stone-500">No transaction requests yet.</p>
+                                ) : null}
+                            </div>
                         </section>
                     </div>
                 </section>

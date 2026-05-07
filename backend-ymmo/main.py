@@ -1,6 +1,7 @@
 from dotenv import load_dotenv
 load_dotenv()
 
+from pathlib import Path
 from fastapi import FastAPI, Depends, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy import inspect, text
@@ -12,6 +13,8 @@ from schemas import (
     LoginRequest,
     PropertyCreate,
     PropertyUpdate,
+    TransactionCreate,
+    TransactionUpdate,
     UserCreate,
     VisitRequestCreate,
     VisitStatusUpdate,
@@ -62,6 +65,34 @@ def ensure_property_columns():
                 connection.execute(text(statement))
 
 ensure_property_columns()
+
+def ensure_transactions_table():
+    with engine.begin() as connection:
+        connection.execute(text("""
+            CREATE TABLE IF NOT EXISTS transactions (
+                transaction_id INTEGER PRIMARY KEY AUTO_INCREMENT,
+                client_id INTEGER NOT NULL,
+                property_id INTEGER NULL,
+                agent_id INTEGER NULL,
+                agency_id INTEGER NULL,
+                transaction_type VARCHAR(20) DEFAULT 'purchase',
+                status VARCHAR(50) DEFAULT 'new',
+                budget DECIMAL(15,2) NULL,
+                notes VARCHAR(1000) DEFAULT '',
+                created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                updated_at DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+                INDEX idx_transactions_client_id (client_id),
+                INDEX idx_transactions_property_id (property_id),
+                INDEX idx_transactions_agent_id (agent_id),
+                INDEX idx_transactions_agency_id (agency_id),
+                CONSTRAINT fk_transactions_client_id FOREIGN KEY (client_id) REFERENCES users(id),
+                CONSTRAINT fk_transactions_property_id FOREIGN KEY (property_id) REFERENCES properties(property_id),
+                CONSTRAINT fk_transactions_agent_id FOREIGN KEY (agent_id) REFERENCES agents(agent_id),
+                CONSTRAINT fk_transactions_agency_id FOREIGN KEY (agency_id) REFERENCES agencies(agency_id)
+            )
+        """))
+
+ensure_transactions_table()
 
 @app.get("/", tags=["Home"])
 def home():
@@ -218,6 +249,34 @@ def get_property(property_id: int, db: Session = Depends(get_db)):
         raise HTTPException(status_code=404, detail="Property not found")
     return prop
 
+@app.get("/properties/{property_id}/gallery", tags=["Properties"], summary="Get all gallery images for a property")
+def get_property_gallery(property_id: int, db: Session = Depends(get_db)):
+    prop = db.query(models.Property).filter(models.Property.property_id == property_id).first()
+    if not prop:
+        raise HTTPException(status_code=404, detail="Property not found")
+
+    if not prop.photo_url:
+        return []
+
+    photo_path = str(prop.photo_url).strip()
+    if not photo_path.startswith("/backend-ymmo/assets/"):
+        return [photo_path]
+
+    # Example photo_url: /backend-ymmo/assets/villa-contemporain/house.jpg
+    relative_path = photo_path.replace("/backend-ymmo/assets/", "", 1)
+    folder_name = Path(relative_path).parent.as_posix()
+    target_dir = Path("assets") / folder_name
+
+    if not target_dir.exists() or not target_dir.is_dir():
+        return [photo_path]
+
+    allowed_ext = {".jpg", ".jpeg", ".png", ".webp", ".gif"}
+    images = sorted(
+        [path for path in target_dir.iterdir() if path.is_file() and path.suffix.lower() in allowed_ext],
+        key=lambda p: p.name.lower(),
+    )
+    return [f"/backend-ymmo/assets/{folder_name}/{img.name}" for img in images]
+
 @app.patch("/properties/{property_id}", tags=["Properties"], summary="Update a property")
 def update_property(property_id: int, property_data: PropertyUpdate, db: Session = Depends(get_db)):
     prop = db.query(models.Property).filter(models.Property.property_id == property_id).first()
@@ -257,6 +316,113 @@ def update_visit_request(visit_id: int, payload: VisitStatusUpdate, db: Session 
     db.commit()
     db.refresh(request)
     return request
+
+# ===== TRANSACTIONS =====
+@app.get("/transactions", tags=["Transactions"], summary="Get all transactions")
+def get_transactions(db: Session = Depends(get_db)):
+    return db.query(models.Transaction).order_by(models.Transaction.created_at.desc()).all()
+
+@app.get("/transactions/{transaction_id}", tags=["Transactions"], summary="Get transaction by ID")
+def get_transaction(transaction_id: int, db: Session = Depends(get_db)):
+    transaction = db.query(models.Transaction).filter(
+        models.Transaction.transaction_id == transaction_id
+    ).first()
+    if not transaction:
+        raise HTTPException(status_code=404, detail="Transaction not found")
+    return transaction
+
+@app.get("/users/{user_id}/transactions", tags=["Transactions"], summary="Get a user's transaction progress")
+def get_user_transactions(user_id: int, db: Session = Depends(get_db)):
+    user = db.query(models.User).filter(models.User.id == user_id).first()
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+    return db.query(models.Transaction).filter(
+        models.Transaction.client_id == user_id
+    ).order_by(models.Transaction.created_at.desc()).all()
+
+@app.post("/transactions", tags=["Transactions"], summary="Create a transaction")
+def create_transaction(payload: TransactionCreate, db: Session = Depends(get_db)):
+    client = db.query(models.User).filter(models.User.id == payload.client_id).first()
+    if not client:
+        raise HTTPException(status_code=404, detail="Client not found")
+    if client.role not in ("client", "agent", "admin"):
+        raise HTTPException(status_code=400, detail="Invalid client role")
+
+    if payload.property_id:
+        property_item = db.query(models.Property).filter(
+            models.Property.property_id == payload.property_id
+        ).first()
+        if not property_item:
+            raise HTTPException(status_code=404, detail="Property not found")
+
+    transaction = models.Transaction(**payload.dict())
+    db.add(transaction)
+    db.commit()
+    db.refresh(transaction)
+    return transaction
+
+@app.patch("/transactions/{transaction_id}", tags=["Transactions"], summary="Update transaction progress")
+def update_transaction(transaction_id: int, payload: TransactionUpdate, db: Session = Depends(get_db)):
+    transaction = db.query(models.Transaction).filter(
+        models.Transaction.transaction_id == transaction_id
+    ).first()
+    if not transaction:
+        raise HTTPException(status_code=404, detail="Transaction not found")
+
+    for field, value in payload.dict(exclude_unset=True).items():
+        setattr(transaction, field, value)
+
+    db.commit()
+    db.refresh(transaction)
+    return transaction
+
+# ===== ANALYTICS =====
+@app.get("/analytics/market-overview", tags=["Analytics"], summary="Market overview and trends")
+def get_market_overview(db: Session = Depends(get_db)):
+    properties = db.query(models.Property).all()
+    transactions = db.query(models.Transaction).all()
+
+    total_properties = len(properties)
+    sold_properties = len([item for item in properties if (item.status or "").lower() == "sold"])
+    available_properties = len([item for item in properties if (item.status or "").lower() != "sold"])
+    avg_price = (
+        float(sum([float(item.price or 0) for item in properties]) / total_properties)
+        if total_properties else 0.0
+    )
+
+    city_distribution = {}
+    type_distribution = {}
+    for item in properties:
+        city_distribution[item.location] = city_distribution.get(item.location, 0) + 1
+        prop_type = item.property_type or "unknown"
+        type_distribution[prop_type] = type_distribution.get(prop_type, 0) + 1
+
+    status_distribution = {}
+    for transaction in transactions:
+        status_distribution[transaction.status] = status_distribution.get(transaction.status, 0) + 1
+
+    completion_ratio = (
+        len([item for item in transactions if (item.status or "").lower() == "completed"]) / len(transactions)
+        if transactions else 0
+    )
+    market_signal = "stable"
+    if completion_ratio >= 0.6 and sold_properties >= max(1, int(total_properties * 0.25)):
+        market_signal = "bullish"
+    elif completion_ratio < 0.25:
+        market_signal = "slowdown"
+
+    return {
+        "total_properties": total_properties,
+        "available_properties": available_properties,
+        "sold_properties": sold_properties,
+        "avg_price": avg_price,
+        "total_transactions": len(transactions),
+        "transaction_completion_ratio": round(completion_ratio, 3),
+        "market_signal": market_signal,
+        "city_distribution": city_distribution,
+        "property_type_distribution": type_distribution,
+        "transaction_status_distribution": status_distribution,
+    }
 
 # ===== AGENCIES =====
 @app.get("/agencies", tags=["Agencies"], summary="Get all agencies")

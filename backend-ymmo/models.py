@@ -62,3 +62,17 @@ class SavedProperty(Base):
     user_id = Column(Integer, ForeignKey("users.id"))
     property_id = Column(Integer, ForeignKey("properties.property_id"))
     created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+class Transaction(Base):
+    __tablename__ = "transactions"
+    transaction_id = Column(Integer, primary_key=True, index=True)
+    client_id = Column(Integer, ForeignKey("users.id"), nullable=False, index=True)
+    property_id = Column(Integer, ForeignKey("properties.property_id"), nullable=True, index=True)
+    agent_id = Column(Integer, ForeignKey("agents.agent_id"), nullable=True, index=True)
+    agency_id = Column(Integer, ForeignKey("agencies.agency_id"), nullable=True, index=True)
+    transaction_type = Column(String(20), default="purchase")  # purchase, sale
+    status = Column(String(50), default="new")  # new, in_review, offer, signed, completed, cancelled
+    budget = Column(Numeric(15, 2), nullable=True)
+    notes = Column(String(1000), default="")
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())

@@ -69,3 +69,22 @@ class VisitStatusUpdate(BaseModel):
 
 class ForgotPasswordRequest(BaseModel):
     email: str
+
+class TransactionCreate(BaseModel):
+    client_id: int
+    property_id: Optional[int] = None
+    agent_id: Optional[int] = None
+    agency_id: Optional[int] = None
+    transaction_type: str = "purchase"
+    status: str = "new"
+    budget: Optional[float] = None
+    notes: str = ""
+
+class TransactionUpdate(BaseModel):
+    property_id: Optional[int] = None
+    agent_id: Optional[int] = None
+    agency_id: Optional[int] = None
+    transaction_type: Optional[str] = None
+    status: Optional[str] = None
+    budget: Optional[float] = None
+    notes: Optional[str] = None

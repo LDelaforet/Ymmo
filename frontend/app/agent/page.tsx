@@ -11,12 +11,15 @@ import {
     fetchAgents,
     fetchAgencies,
     fetchProperties,
+    fetchTransactions,
     fetchVisitRequests,
+    updateTransaction,
     updateProperty,
     updateVisitRequest,
     type Agent,
     type Agency,
     type Property,
+    type Transaction,
     type VisitRequest,
 } from "@/lib/api";
 
@@ -28,6 +31,7 @@ export default function AgentOfficePage() {
     const [agencies, setAgencies] = useState<Agency[]>([]);
     const [status, setStatus] = useState("all");
     const [visits, setVisits] = useState<VisitRequest[]>([]);
+    const [transactions, setTransactions] = useState<Transaction[]>([]);
     const [selectedLeadProperty, setSelectedLeadProperty] = useState<Property | null>(null);
     const [error, setError] = useState("");
     const [notice, setNotice] = useState("");
@@ -52,16 +56,18 @@ export default function AgentOfficePage() {
         async function loadData() {
             setError("");
             try {
-                const [propertyData, agentData, agencyData, visitData] = await Promise.all([
+                const [propertyData, agentData, agencyData, visitData, transactionData] = await Promise.all([
                     fetchProperties(),
                     fetchAgents(),
                     fetchAgencies(),
                     fetchVisitRequests(),
+                    fetchTransactions(),
                 ]);
                 setProperties(propertyData);
                 setAgents(agentData);
                 setAgencies(agencyData);
                 setVisits(visitData);
+                setTransactions(transactionData);
             } catch (loadError) {
                 setError(loadError instanceof Error ? loadError.message : "Could not load the agent office.");
             }
@@ -92,6 +98,12 @@ export default function AgentOfficePage() {
     const selectedVisits = selectedLeadProperty
         ? visits.filter((visit) => visit.property_id === selectedLeadProperty.property_id)
         : [];
+    const visibleTransactions = currentAgent
+        ? transactions.filter(
+            (transaction) =>
+                transaction.agent_id === currentAgent.agent_id || transaction.agency_id === currentAgent.agency_id,
+        )
+        : transactions;
 
     async function handleCreateProperty(event: FormEvent<HTMLFormElement>) {
         event.preventDefault();
@@ -163,6 +175,20 @@ export default function AgentOfficePage() {
             );
         } catch (updateError) {
             setError(updateError instanceof Error ? updateError.message : "Could not update this lead.");
+        }
+    }
+
+    async function handleTransactionStatus(transactionId: number, status: string) {
+        setError("");
+        try {
+            const updated = await updateTransaction(transactionId, { status });
+            setTransactions((current) =>
+                current.map((transaction) =>
+                    transaction.transaction_id === transactionId ? updated : transaction,
+                ),
+            );
+        } catch (updateError) {
+            setError(updateError instanceof Error ? updateError.message : "Could not update this transaction.");
         }
     }
 
@@ -428,6 +454,66 @@ export default function AgentOfficePage() {
                             </div>
                         </div>
                     ) : null}
+
+                    <div className="mt-10 overflow-hidden rounded-lg border border-stone-200 bg-white">
+                        <div className="border-b border-stone-200 p-5">
+                            <h2 className="text-2xl font-black text-stone-950">Client transactions</h2>
+                            <p className="mt-1 text-sm text-stone-600">
+                                Update the progress of purchase and sale projects assigned to your agency.
+                            </p>
+                        </div>
+                        <div className="overflow-x-auto">
+                            <table className="w-full min-w-160 text-left text-sm">
+                                <thead className="bg-stone-50 text-xs font-bold uppercase tracking-wide text-stone-500">
+                                    <tr>
+                                        <th className="px-5 py-3">ID</th>
+                                        <th className="px-5 py-3">Type</th>
+                                        <th className="px-5 py-3">Budget</th>
+                                        <th className="px-5 py-3">Status</th>
+                                    </tr>
+                                </thead>
+                                <tbody className="divide-y divide-stone-100">
+                                    {visibleTransactions.map((transaction) => (
+                                        <tr key={transaction.transaction_id}>
+                                            <td className="px-5 py-3 font-semibold text-stone-900">
+                                                #{transaction.transaction_id}
+                                            </td>
+                                            <td className="px-5 py-3 capitalize text-stone-700">
+                                                {transaction.transaction_type}
+                                            </td>
+                                            <td className="px-5 py-3 text-stone-700">
+                                                {transaction.budget ? `${transaction.budget}` : "-"}
+                                            </td>
+                                            <td className="px-5 py-3">
+                                                <select
+                                                    value={transaction.status}
+                                                    onChange={(event) =>
+                                                        handleTransactionStatus(
+                                                            transaction.transaction_id,
+                                                            event.target.value,
+                                                        )
+                                                    }
+                                                    className="min-h-10 rounded-md border border-stone-300 px-3 text-sm font-semibold text-stone-800"
+                                                >
+                                                    <option value="new">New</option>
+                                                    <option value="in_review">In review</option>
+                                                    <option value="offer">Offer</option>
+                                                    <option value="signed">Signed</option>
+                                                    <option value="completed">Completed</option>
+                                                    <option value="cancelled">Cancelled</option>
+                                                </select>
+                                            </td>
+                                        </tr>
+                                    ))}
+                                </tbody>
+                            </table>
+                            {visibleTransactions.length === 0 ? (
+                                <p className="p-4 text-sm text-stone-500">
+                                    No transactions assigned to this agency yet.
+                                </p>
+                            ) : null}
+                        </div>
+                    </div>
                 </section>
             </main>
         </>
