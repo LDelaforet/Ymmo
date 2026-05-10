@@ -93,7 +93,7 @@ export default function Navbar() {
                                         </div>
                                         <div className="p-1">
                                             <Link
-                                                href={user.role === "admin" ? "/admin" : user.role === "agent" ? "/agent" : "/dashboard"}
+                                                href="/profile"
                                                 onClick={() => setProfileOpen(false)}
                                                 className="block rounded-md px-3 py-2 text-sm font-medium text-[#5a4738] hover:bg-[#efe4d6]"
                                             >
@@ -157,7 +157,7 @@ export default function Navbar() {
                         {user ? (
                             <>
                                 <Link
-                                    href={user.role === "admin" ? "/admin" : user.role === "agent" ? "/agent" : "/dashboard"}
+                                    href="/profile"
                                     onClick={() => setOpen(false)}
                                     className="rounded-md bg-[#efe4d6] px-3 py-2 text-sm font-semibold text-[#5a4738]"
                                 >

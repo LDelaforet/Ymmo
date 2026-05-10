@@ -2,13 +2,18 @@ from dotenv import load_dotenv
 load_dotenv()
 
 from pathlib import Path
-from fastapi import FastAPI, Depends, HTTPException
+import base64
+import hashlib
+import hmac
+import os
+from fastapi import FastAPI, Depends, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy import inspect, text
 from sqlalchemy.orm import Session
 from database import engine, get_db
 import models
 from schemas import (
+    ChangePasswordRequest,
     ForgotPasswordRequest,
     LoginRequest,
     PropertyCreate,
@@ -16,6 +21,7 @@ from schemas import (
     TransactionCreate,
     TransactionUpdate,
     UserCreate,
+    UserProfileUpdate,
     VisitRequestCreate,
     VisitStatusUpdate,
 )
@@ -42,6 +48,48 @@ app.add_middleware(
 )
 
 models.Base.metadata.create_all(bind=engine)
+
+PASSWORD_ALGORITHM = "pbkdf2_sha256"
+PASSWORD_ITERATIONS = 120000
+DATABASE_URL = "mysql+pymysql://avnadmin:password@host:port/defaultdb?ssl_ca=/path/to/ca.pem"
+
+def hash_password(plain_password: str) -> str:
+    salt = os.urandom(16)
+    digest = hashlib.pbkdf2_hmac(
+        "sha256",
+        plain_password.encode("utf-8"),
+        salt,
+        PASSWORD_ITERATIONS,
+    )
+    return (
+        f"{PASSWORD_ALGORITHM}${PASSWORD_ITERATIONS}"
+        f"${base64.urlsafe_b64encode(salt).decode('utf-8')}"
+        f"${base64.urlsafe_b64encode(digest).decode('utf-8')}"
+    )
+
+
+def verify_password(stored_password: str, plain_password: str) -> bool:
+    try:
+        algorithm, iterations_raw, salt_raw, digest_raw = stored_password.split("$", 3)
+        if algorithm != PASSWORD_ALGORITHM:
+            return False
+
+        iterations = int(iterations_raw)
+        salt = base64.urlsafe_b64decode(salt_raw.encode("utf-8"))
+        expected_digest = base64.urlsafe_b64decode(digest_raw.encode("utf-8"))
+        test_digest = hashlib.pbkdf2_hmac(
+            "sha256",
+            plain_password.encode("utf-8"),
+            salt,
+            iterations,
+        )
+        return hmac.compare_digest(expected_digest, test_digest)
+    except (ValueError, TypeError):
+        return False
+
+
+def is_hashed_password(password: str | None) -> bool:
+    return bool(password and password.startswith(f"{PASSWORD_ALGORITHM}$"))
 
 def ensure_property_columns():
     inspector = inspect(engine)
@@ -108,7 +156,12 @@ def login(credentials: LoginRequest, db: Session = Depends(get_db)):
         raise HTTPException(status_code=401, detail="Invalid email or password")
 
     legacy_password = user.password in (None, "")
-    password_matches = user.password == credentials.password
+    hashed_password = is_hashed_password(user.password)
+    password_matches = (
+        verify_password(user.password, credentials.password)  # type: ignore[arg-type]
+        if hashed_password
+        else user.password == credentials.password
+    )
     legacy_dev_login = legacy_password and credentials.password in ("", "password")
 
     if not password_matches and not legacy_dev_login:  # type: ignore
@@ -144,6 +197,19 @@ def get_user(user_id: int, db: Session = Depends(get_db)):
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
     return user
+
+
+@app.get("/users/check-email", tags=["Users"], summary="Check if email is available")
+def check_email_availability(
+    email: str = Query(...),
+    exclude_user_id: int | None = Query(default=None),
+    db: Session = Depends(get_db),
+):
+    query = db.query(models.User).filter(models.User.email == email)
+    if exclude_user_id is not None:
+        query = query.filter(models.User.id != exclude_user_id)
+    exists = query.first() is not None
+    return {"available": not exists}
 
 @app.get("/users/{user_id}/saved-properties", tags=["Users"], summary="Get saved property IDs")
 def get_saved_properties(user_id: int, db: Session = Depends(get_db)):
@@ -191,19 +257,95 @@ def create_user(user: UserCreate, db: Session = Depends(get_db)):
     existing_user = db.query(models.User).filter(models.User.email == user.email).first()
     if existing_user:
         raise HTTPException(status_code=409, detail="Email already exists")
+    if len(user.password) < 8:
+        raise HTTPException(status_code=400, detail="Password must contain at least 8 characters")
 
     role = user.role if user.role in ("client", "agent", "admin") else "client"
     db_user = models.User(
         first_name=user.first_name,
         last_name=user.last_name,
         email=user.email,
-        password=user.password,
+        password=hash_password(user.password),
         role=role
     )
     db.add(db_user)
     db.commit()
     db.refresh(db_user)
     return db_user
+
+
+@app.patch("/users/{user_id}", tags=["Users"], summary="Update personal profile")
+def update_user_profile(user_id: int, payload: UserProfileUpdate, db: Session = Depends(get_db)):
+    user = db.query(models.User).filter(models.User.id == user_id).first()
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+
+    email_taken = db.query(models.User).filter(
+        models.User.email == payload.email,
+        models.User.id != user_id,
+    ).first()
+    if email_taken:
+        raise HTTPException(status_code=409, detail="Email already exists")
+
+    user.first_name = payload.first_name
+    user.last_name = payload.last_name
+    user.email = payload.email
+    db.commit()
+    db.refresh(user)
+    return user
+
+
+@app.post("/users/{user_id}/change-password", tags=["Users"], summary="Change account password")
+def change_user_password(user_id: int, payload: ChangePasswordRequest, db: Session = Depends(get_db)):
+    user = db.query(models.User).filter(models.User.id == user_id).first()
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+    if len(payload.new_password) < 8:
+        raise HTTPException(status_code=400, detail="Password must contain at least 8 characters")
+
+    legacy_password = user.password in (None, "")
+    hashed_password = is_hashed_password(user.password)
+    current_matches = (
+        verify_password(user.password, payload.current_password)  # type: ignore[arg-type]
+        if hashed_password
+        else user.password == payload.current_password
+    )
+    legacy_dev_login = legacy_password and payload.current_password in ("", "password")
+
+    if not current_matches and not legacy_dev_login:
+        raise HTTPException(status_code=401, detail="Current password is incorrect")
+
+    user.password = hash_password(payload.new_password)
+    db.commit()
+    return {"updated": True}
+
+
+@app.delete("/users/{user_id}", tags=["Users"], summary="Delete user account")
+def delete_user_account(user_id: int, db: Session = Depends(get_db)):
+    user = db.query(models.User).filter(models.User.id == user_id).first()
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+
+    agent_rows = db.query(models.Agent).filter(models.Agent.user_id == user_id).all()
+    agent_ids = [row.agent_id for row in agent_rows]
+
+    db.query(models.SavedProperty).filter(models.SavedProperty.user_id == user_id).delete(synchronize_session=False)
+    db.query(models.VisitRequest).filter(models.VisitRequest.user_id == user_id).delete(synchronize_session=False)
+    db.query(models.Transaction).filter(models.Transaction.client_id == user_id).delete(synchronize_session=False)
+
+    if agent_ids:
+        db.query(models.Transaction).filter(models.Transaction.agent_id.in_(agent_ids)).delete(
+            synchronize_session=False
+        )
+        db.query(models.Property).filter(models.Property.agent_id.in_(agent_ids)).update(
+            {models.Property.agent_id: None},
+            synchronize_session=False,
+        )
+        db.query(models.Agent).filter(models.Agent.agent_id.in_(agent_ids)).delete(synchronize_session=False)
+
+    db.delete(user)
+    db.commit()
+    return {"deleted": True}
 
 # ===== AGENTS =====
 @app.get("/agents", tags=["Agents"], summary="Get all agents")

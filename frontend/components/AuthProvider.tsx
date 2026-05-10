@@ -17,6 +17,7 @@ interface AuthContextValue {
     ready: boolean;
     login: (email: string, password: string) => Promise<User>;
     logout: () => void;
+    updateCurrentUser: (updatedUser: User) => void;
 }
 
 const AuthContext = createContext<AuthContextValue | null>(null);
@@ -48,12 +49,18 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         window.localStorage.removeItem(STORAGE_KEY);
     }
 
+    function updateCurrentUser(updatedUser: User) {
+        setUser(updatedUser);
+        window.localStorage.setItem(STORAGE_KEY, JSON.stringify(updatedUser));
+    }
+
     const value = useMemo(
         () => ({
             user,
             ready,
             login,
             logout,
+            updateCurrentUser,
             isAgent: user?.role === "agent" || user?.role === "admin",
             isClient: user?.role === "client" || user?.role === "agent" || user?.role === "admin",
             isAdmin: user?.role === "admin",

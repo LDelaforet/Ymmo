@@ -34,6 +34,9 @@ export default function LoginPage() {
             }
 
             if (mode === "register") {
+                if (password.length < 8) {
+                    throw new Error("Password must contain at least 8 characters.");
+                }
                 const createdUser = await createUser({
                     first_name: firstName,
                     last_name: lastName,
@@ -142,6 +145,11 @@ export default function LoginPage() {
                                     className="mt-2 min-h-11 w-full rounded-md border border-stone-300 px-3 font-normal text-stone-950 outline-none focus:border-emerald-700"
                                     required
                                 />
+                                {mode === "register" ? (
+                                    <p className="mt-2 text-xs font-semibold text-stone-500">
+                                        Use at least 8 characters.
+                                    </p>
+                                ) : null}
                             </label>
                             ) : null}
 

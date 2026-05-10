@@ -182,6 +182,43 @@ export async function createUser(user: {
     });
 }
 
+export async function updateUserProfile(
+    userId: number,
+    payload: Pick<User, "first_name" | "last_name" | "email">,
+): Promise<User> {
+    return apiRequest<User>(`/users/${userId}`, {
+        method: "PATCH",
+        body: JSON.stringify(payload),
+    });
+}
+
+export async function changeUserPassword(
+    userId: number,
+    payload: { current_password: string; new_password: string },
+): Promise<{ updated: boolean }> {
+    return apiRequest<{ updated: boolean }>(`/users/${userId}/change-password`, {
+        method: "POST",
+        body: JSON.stringify(payload),
+    });
+}
+
+export async function checkEmailAvailability(
+    email: string,
+    excludeUserId?: number,
+): Promise<{ available: boolean }> {
+    const params = new URLSearchParams({ email });
+    if (excludeUserId !== undefined) {
+        params.set("exclude_user_id", String(excludeUserId));
+    }
+    return apiRequest<{ available: boolean }>(`/users/check-email?${params.toString()}`);
+}
+
+export async function deleteUserAccount(userId: number): Promise<{ deleted: boolean }> {
+    return apiRequest<{ deleted: boolean }>(`/users/${userId}`, {
+        method: "DELETE",
+    });
+}
+
 export async function createVisitRequest(
     propertyId: number,
     request: {

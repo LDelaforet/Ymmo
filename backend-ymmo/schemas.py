@@ -13,6 +13,17 @@ class UserCreate(UserBase):
     password: str = ""
     role: str = "client"
 
+
+class UserProfileUpdate(BaseModel):
+    first_name: str
+    last_name: str
+    email: str
+
+
+class ChangePasswordRequest(BaseModel):
+    current_password: str
+    new_password: str
+
 class LoginRequest(BaseModel):
     email: str
     password: str
