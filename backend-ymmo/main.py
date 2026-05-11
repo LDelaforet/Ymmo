@@ -6,7 +6,11 @@ import base64
 import hashlib
 import hmac
 import os
-from fastapi import FastAPI, Depends, HTTPException, Query
+import re
+import uuid
+from typing import List
+
+from fastapi import FastAPI, Depends, HTTPException, Query, File, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy import inspect, text
 from sqlalchemy.orm import Session
@@ -141,6 +145,22 @@ def ensure_transactions_table():
         """))
 
 ensure_transactions_table()
+
+ALLOWED_IMAGE_EXTENSIONS = {".jpg", ".jpeg", ".png", ".webp", ".gif"}
+MAX_IMAGE_SIZE_BYTES = 10 * 1024 * 1024  # 10MB per file
+
+def _safe_filename(original_name: str) -> str:
+    name = (original_name or "upload").strip()
+    base = Path(name).stem
+    ext = Path(name).suffix.lower()
+    if ext not in ALLOWED_IMAGE_EXTENSIONS:
+        raise HTTPException(status_code=400, detail=f"Unsupported image type: {ext or '(no extension)'}")
+
+    base = re.sub(r"[^a-zA-Z0-9._-]+", "-", base).strip("-._")
+    if not base:
+        base = "image"
+
+    return f"{base}-{uuid.uuid4().hex}{ext}"
 
 @app.get("/", tags=["Home"])
 def home():
@@ -382,6 +402,49 @@ def create_property(property_data: PropertyCreate, db: Session = Depends(get_db)
     db.commit()
     db.refresh(prop)
     return prop
+
+@app.post(
+    "/properties/{property_id}/images",
+    tags=["Properties"],
+    summary="Upload one or multiple images for a property",
+)
+async def upload_property_images(
+    property_id: int,
+    images: List[UploadFile] = File(...),
+    db: Session = Depends(get_db),
+):
+    prop = db.query(models.Property).filter(models.Property.property_id == property_id).first()
+    if not prop:
+        raise HTTPException(status_code=404, detail="Property not found")
+
+    if not images:
+        raise HTTPException(status_code=400, detail="No files uploaded")
+
+    target_dir = Path("assets") / "uploads" / f"property-{property_id}"
+    target_dir.mkdir(parents=True, exist_ok=True)
+
+    saved_paths: list[str] = []
+    for upload in images:
+        filename = _safe_filename(upload.filename or "image")
+        destination = target_dir / filename
+
+        content = await upload.read()
+        if len(content) > MAX_IMAGE_SIZE_BYTES:
+            raise HTTPException(status_code=413, detail=f"File too large: {upload.filename}")
+
+        destination.write_bytes(content)
+        saved_paths.append(f"/backend-ymmo/assets/uploads/property-{property_id}/{filename}")
+
+    if saved_paths:
+        prop.photo_url = saved_paths[0]
+        db.commit()
+        db.refresh(prop)
+
+    return {
+        "property_id": property_id,
+        "photo_url": prop.photo_url,
+        "images": saved_paths,
+    }
 
 @app.get("/properties/{property_id}", tags=["Properties"], summary="Get property by ID")
 def get_property(property_id: int, db: Session = Depends(get_db)):

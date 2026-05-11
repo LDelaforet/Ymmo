@@ -151,6 +151,28 @@ export async function createProperty(property: PropertyPayload): Promise<Propert
     });
 }
 
+export async function uploadPropertyImages(
+    propertyId: number,
+    images: File[],
+): Promise<{ property_id: number; photo_url: string; images: string[] }> {
+    const formData = new FormData();
+    for (const image of images) {
+        formData.append("images", image);
+    }
+
+    const response = await fetch(`${API_URL}/properties/${propertyId}/images`, {
+        method: "POST",
+        body: formData,
+    });
+
+    if (!response.ok) {
+        const error = await response.json().catch(() => null);
+        throw new Error(error?.detail || `Image upload failed (${response.status})`);
+    }
+
+    return (await response.json()) as { property_id: number; photo_url: string; images: string[] };
+}
+
 export async function updateProperty(
     propertyId: number,
     property: Partial<PropertyPayload>,

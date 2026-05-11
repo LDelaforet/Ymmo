@@ -13,6 +13,7 @@ import {
     fetchProperties,
     fetchTransactions,
     fetchVisitRequests,
+    uploadPropertyImages,
     updateTransaction,
     updateProperty,
     updateVisitRequest,
@@ -43,8 +44,8 @@ export default function AgentOfficePage() {
         bedrooms: "2",
         surface: "60",
         property_type: "apartment",
-        photo_url: "",
     });
+    const [newPropertyImages, setNewPropertyImages] = useState<File[]>([]);
 
     useEffect(() => {
         if (ready && (!user || !isAgent)) {
@@ -130,10 +131,17 @@ export default function AgentOfficePage() {
                 bedrooms: Number(newProperty.bedrooms),
                 surface: Number(newProperty.surface),
                 property_type: newProperty.property_type,
-                photo_url: newProperty.photo_url,
+                photo_url: "",
                 agency_id: agency.agency_id,
                 agent_id: agent.agent_id,
             });
+
+            let publishedProperty = created;
+            if (newPropertyImages.length > 0) {
+                const uploaded = await uploadPropertyImages(created.property_id, newPropertyImages);
+                publishedProperty = { ...created, photo_url: uploaded.photo_url };
+            }
+
             setProperties((current) => [created, ...current]);
             setNewProperty({
                 title: "",
@@ -143,8 +151,13 @@ export default function AgentOfficePage() {
                 bedrooms: "2",
                 surface: "60",
                 property_type: "apartment",
-                photo_url: "",
             });
+            setNewPropertyImages([]);
+            setProperties((current) =>
+                current.map((property) =>
+                    property.property_id === created.property_id ? publishedProperty : property,
+                ),
+            );
             setNotice("Property created and published.");
         } catch (createError) {
             setError(createError instanceof Error ? createError.message : "Could not create the property.");
@@ -284,7 +297,7 @@ export default function AgentOfficePage() {
                         <div className="lg:col-span-4">
                             <h2 className="text-2xl font-black text-stone-950">Create a property</h2>
                             <p className="mt-1 text-sm text-stone-600">
-                                Add concrete details and a photo URL so buyers can compare listings.
+                                Add concrete details and upload one or multiple photos so buyers can compare listings.
                             </p>
                         </div>
                         <input
@@ -336,10 +349,14 @@ export default function AgentOfficePage() {
                             required
                         />
                         <input
-                            value={newProperty.photo_url}
-                            onChange={(event) => setNewProperty((current) => ({ ...current, photo_url: event.target.value }))}
-                            placeholder="Photo URL"
-                            className="min-h-11 rounded-md border border-stone-300 px-3 text-sm text-stone-950 lg:col-span-2"
+                            type="file"
+                            accept="image/*"
+                            multiple
+                            onChange={(event) => {
+                                const files = Array.from(event.target.files || []);
+                                setNewPropertyImages(files);
+                            }}
+                            className="min-h-11 rounded-md border border-stone-300 bg-white px-3 py-2 text-sm text-stone-950 lg:col-span-2"
                         />
                         <textarea
                             value={newProperty.description}
